@@ -177,7 +177,7 @@ HttpClient::TransferState::State HttpClient::TransferState::get_state() {
 // HttpClient::TransferTask implementation
 HttpClient::TransferTask::TransferTask(HttpRequest r) :
 	transfer(r),
-	state(std::make_shared<TransferState>(this->promise.get_future().share(), this->transfer.curlEasy)) {}
+	state(std::shared_ptr<TransferState>(new TransferState{this->promise.get_future().share(), this->transfer.curlEasy})) {};
 
 // HttpClient implementation
 HttpClient& HttpClient::getInstance() {

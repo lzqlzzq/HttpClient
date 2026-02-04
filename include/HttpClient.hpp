@@ -153,9 +153,6 @@ private:
 
 class HttpClient {
 public:
-	static HttpClient& getInstance();
-
-	void stop();
 
 	class TransferState {
 	public:
@@ -164,8 +161,6 @@ public:
 		};
 		std::shared_future<HttpResponse> future;
 
-		explicit TransferState(std::shared_future<HttpResponse>&& future, CURL* curl);
-
 		void cancel();
 		State get_state();
 
@@ -173,8 +168,14 @@ public:
 		std::atomic<State> state = State::Ongoing;
 		CURL* curl;  // Only for look-up
 
+		explicit TransferState(std::shared_future<HttpResponse>&& future, CURL* curl);
+
 		friend class HttpClient;
 	};
+
+	static HttpClient& getInstance();
+
+	void stop();
 
 	template<class... U>
 	HttpResponse request(U&&... req) {
@@ -206,9 +207,9 @@ private:
 
 	class TransferTask {
 	private:
+		HttpTransfer transfer;
 		std::promise<HttpResponse> promise;
 		std::shared_ptr<TransferState> state;
-		HttpTransfer transfer;
 
 		explicit TransferTask(HttpRequest r);
 
