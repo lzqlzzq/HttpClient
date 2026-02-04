@@ -118,8 +118,8 @@ public:
 
 	HttpRequest(std::string url, std::string methodName, long timeout_ms = 0, long conn_timeout_ms = 0,
 				std::vector<std::string> headers = {}, std::string body = {})
-		: url(url), methodName(methodName), method(method2Enum(methodName)), timeout_ms(timeout_ms),
-		  conn_timeout_ms(conn_timeout_ms), headers(headers), body(body) {};
+		: url(std::move(url)), methodName(methodName), method(method2Enum(methodName)), timeout_ms(timeout_ms),
+		  conn_timeout_ms(conn_timeout_ms), headers(std::move(headers)), body(std::move(body)) {};
 
 	std::string url;
 	std::string methodName;
