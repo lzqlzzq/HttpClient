@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <condition_variable>
@@ -13,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <utility>
 
 #ifdef __cplusplus
@@ -37,6 +39,47 @@ namespace http_client {
 
 void CURL_EASY_DEFAULT_SETTING(CURL* handle);
 void CURL_MULTI_DEFAULT_SETTING(CURLM* handle);
+
+template<typename T,
+	class = std::enable_if_t<std::is_arithmetic<T>::value>>
+class SlidingAvg {
+public:
+	explicit SlidingAvg(size_t capacity) : cap(capacity) {this->buffer.reserve(capacity);};
+
+	void push(T value) {
+		if(this->size < this->cap) [[__unlikely__]] {
+			// Not full
+			this->buffer[this->head_] = value;
+			this->sum_ += value;
+			++this->size;
+            this->head_ = (this->head_ + 1) % this->cap;
+		} else {
+			// Full
+            this->sum_ -= this->buffer[this->head_];
+            this->buffer[this->head_] = value;
+            this->sum_ += value;
+            this->head_ = (this->head_ + 1) % this->cap;
+		}
+	}
+
+    double mean() const {
+        return this->size ? static_cast<double>(sum_) / this->size : 0.0;
+    }
+
+	void clear() {
+		this->head_ = 0;
+		this->size = 0;
+		std::fill(this->buffer.begin(), this->buffer.end(), 0);
+	};
+
+private:
+	std::vector<T> buffer;
+	size_t size = 0;
+	size_t cap = 0;
+	size_t head_ = 0;
+
+	double sum_ = 0.0;
+};
 
 class HttpRequest {
 public:
@@ -102,7 +145,7 @@ struct HttpResponse {
 	std::string body;
 	std::string error;// non-empty on error
 
-	double elapsed;
+	float elapsed;
 };
 
 class HttpTransfer {

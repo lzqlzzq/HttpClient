@@ -1,4 +1,5 @@
 #include "HttpClient.hpp"
+#include <curl/easy.h>
 
 namespace http_client {
 
@@ -14,6 +15,9 @@ void CURL_EASY_DEFAULT_SETTING(CURL* handle) {
 }
 
 void CURL_MULTI_DEFAULT_SETTING(CURLM* handle) {
+#if LIBCURL_VERSION_NUM >= 0x080c00
+	curl_multi_setopt(handle, CURLMOPT_NETWORK_CHANGED, CURLMNWC_CLEAR_CONNS | CURLMNWC_CLEAR_DNS);
+#endif
 	curl_multi_setopt(handle, CURLMOPT_MAX_HOST_CONNECTIONS, 2L);
 	curl_multi_setopt(handle, CURLMOPT_MAX_TOTAL_CONNECTIONS, 4L);
 	curl_multi_setopt(handle, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
@@ -61,11 +65,11 @@ HttpTransfer::HttpTransfer(const HttpRequest& request) : url(request.url) {
 	}
 	}
 
-	curl_easy_setopt(this->curlEasy, CURLOPT_WRITEFUNCTION, this->body_cb);
+	curl_easy_setopt(this->curlEasy, CURLOPT_WRITEFUNCTION, HttpTransfer::body_cb);
 	curl_easy_setopt(this->curlEasy, CURLOPT_WRITEDATA, &response.body);
-	curl_easy_setopt(this->curlEasy, CURLOPT_HEADERFUNCTION, this->header_cb);
+	curl_easy_setopt(this->curlEasy, CURLOPT_HEADERFUNCTION, HttpTransfer::header_cb);
 	curl_easy_setopt(this->curlEasy, CURLOPT_HEADERDATA, &response.headers);
-}
+};
 
 HttpTransfer::~HttpTransfer() {
 	curl_easy_cleanup(this->curlEasy);
