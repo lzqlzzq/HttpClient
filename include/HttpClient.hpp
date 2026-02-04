@@ -73,6 +73,7 @@ public:
 	HttpRequest(
 		std::string url,
 		std::string methodName,
+		long conn_timeout_ms = 0,
 		long timeout_ms = 0,
 		std::vector<std::string> headers = {},
 		std::string body = {}) :
@@ -80,6 +81,7 @@ public:
 		methodName(methodName),
 		method(method2Enum(methodName)),
 		timeout_ms(timeout_ms),
+		conn_timeout_ms(conn_timeout_ms),
 		headers(headers),
 		body(body) {};
 
@@ -89,7 +91,8 @@ public:
 	std::vector<std::string> headers;  // e.g. "Content-Type: application/json"
 	std::string body;				   // request body for POST
 
-	long timeout_ms = 0;  // optional per-request timeout (<=0 means wait indefinitely)
+	const long timeout_ms = 0;  // optional per-request timeout (<=0 means wait indefinitely)
+	const long conn_timeout_ms = 0;  // optional connection (DNS+handshake) timeout (<=0 means wait indefinitely)
 };
 
 struct HttpResponse {
@@ -125,7 +128,6 @@ private:
 	struct curl_slist* headers_ = NULL;
 	HttpResponse response;
 	std::string url;
-	long timeout_ms = 0;
 
 	static size_t body_cb(void* ptr, size_t size, size_t nmemb, std::string* data);
 	static size_t header_cb(void* ptr, size_t size, size_t nmemb, std::vector<std::string>* data);

@@ -21,15 +21,16 @@ void CURL_MULTI_DEFAULT_SETTING(CURLM* handle) {
 }
 
 // HttpTransfer implementation
-HttpTransfer::HttpTransfer(const HttpRequest& request) : timeout_ms(request.timeout_ms),
-														  url(request.url) {
+HttpTransfer::HttpTransfer(const HttpRequest& request) : url(request.url) {
 	this->curlEasy = curl_easy_init();
 
 	CURL_EASY_DEFAULT_SETTING(this->curlEasy);
 
 	curl_easy_setopt(this->curlEasy, CURLOPT_URL, request.url.c_str());
-	if (this->timeout_ms > 0)
-		curl_easy_setopt(this->curlEasy, CURLOPT_TIMEOUT_MS, timeout_ms);
+	if (request.timeout_ms > 0)
+		curl_easy_setopt(this->curlEasy, CURLOPT_TIMEOUT_MS, request.timeout_ms);
+	if (request.conn_timeout_ms > 0)
+		curl_easy_setopt(this->curlEasy, CURLOPT_CONNECTTIMEOUT_MS, request.conn_timeout_ms);
 
 	for (const auto header : request.headers) {
 		this->headers_ = curl_slist_append(this->headers_, header.c_str());
@@ -74,8 +75,7 @@ HttpTransfer::~HttpTransfer() {
 HttpTransfer::HttpTransfer(HttpTransfer&& other) noexcept : curlEasy(std::exchange(other.curlEasy, nullptr)),
 															headers_(std::exchange(other.headers_, nullptr)),
 															response(std::move(other.response)),
-															url(std::move(other.url)),
-															timeout_ms(other.timeout_ms) {
+															url(std::move(other.url)) {
 	if (curlEasy) {
 		curl_easy_setopt(curlEasy, CURLOPT_WRITEDATA, &response.body);
 		curl_easy_setopt(curlEasy, CURLOPT_HEADERDATA, &response.headers);
