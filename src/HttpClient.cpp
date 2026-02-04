@@ -41,28 +41,29 @@ HttpTransfer::HttpTransfer(const HttpRequest& request) : url(request.url) {
 	}
 	curl_easy_setopt(this->curlEasy, CURLOPT_HTTPHEADER, this->headers_);
 
-	switch (request.method) {
-	case HttpRequest::HEAD: {
-		curl_easy_setopt(this->curlEasy, CURLOPT_NOBODY, 1L);
-		break;
-	}
-	case HttpRequest::GET: {
-		curl_easy_setopt(this->curlEasy, CURLOPT_HTTPGET, 1L);
-		break;
-	}
-	case HttpRequest::POST: {
-		curl_easy_setopt(this->curlEasy, CURLOPT_POST, 1L);
-		curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDS, request.body.c_str());
-		curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDSIZE, request.body.size());
-		break;
-	}
-	default: {
-		curl_easy_setopt(this->curlEasy, CURLOPT_CUSTOMREQUEST, request.methodName.c_str());
-		if (request.body.size()) {
+	switch (HttpRequest::method2Enum(request.methodName)) {
+		case HttpRequest::HEAD: {
+			curl_easy_setopt(this->curlEasy, CURLOPT_NOBODY, 1L);
+			break;
+		}
+		case HttpRequest::GET: {
+			curl_easy_setopt(this->curlEasy, CURLOPT_NOBODY, 1L);
+			curl_easy_setopt(this->curlEasy, CURLOPT_HTTPGET, 1L);
+			break;
+		}
+		case HttpRequest::POST: {
+			curl_easy_setopt(this->curlEasy, CURLOPT_POST, 1L);
 			curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDS, request.body.c_str());
 			curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDSIZE, request.body.size());
+			break;
 		}
-	}
+		default: {
+			curl_easy_setopt(this->curlEasy, CURLOPT_CUSTOMREQUEST, toupper(request.methodName).c_str());
+			if (request.body.size()) {
+				curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDS, request.body.c_str());
+				curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDSIZE, request.body.size());
+			}
+		}
 	}
 
 	curl_easy_setopt(this->curlEasy, CURLOPT_WRITEFUNCTION, HttpTransfer::body_cb);
@@ -351,6 +352,26 @@ void HttpClient::worker_loop() {
 			curl_multi_add_handle(this->multi_, this->transfers.back().transfer.curlEasy);
 		}
 	}
+}
+
+HttpResponse HttpClient::request(HttpRequest request) {
+	std::shared_ptr<TransferState> state = this->send_request(std::move(request));
+
+	return state->future.get();
+}
+
+std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest request) {
+	TransferTask task(std::move(request));
+	std::shared_ptr<TransferState> state = task.state;
+
+	this->sema_.acquire();
+	{
+		std::unique_lock lk(this->mutex_);
+		this->requests.emplace(std::move(task));
+	}
+	curl_multi_wakeup(this->multi_);
+
+	return state;
 }
 
 } // namespace http_client

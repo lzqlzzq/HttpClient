@@ -15,7 +15,6 @@
 #include <string_view>
 #include <thread>
 #include <type_traits>
-#include <utility>
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,6 +39,14 @@ namespace http_client {
 
 void CURL_EASY_DEFAULT_SETTING(CURL* handle);
 void CURL_MULTI_DEFAULT_SETTING(CURLM* handle);
+
+static std::string toupper(const std::string& str) {
+	std::string s(str);
+	for (char& c : s)
+		if (c >= 'a' && c <= 'z')
+			c -= 32;
+	return s;
+};
 
 template <typename T, class = std::enable_if_t<std::is_arithmetic<T>::value>> class SlidingAvg {
 public:
@@ -82,7 +89,7 @@ private:
 	double sum_ = 0.0;
 };
 
-class HttpRequest {
+struct HttpRequest {
 public:
 #define HTTP_METHODS                                                                                                   \
 	HTTP_METHOD(GET)                                                                                                   \
@@ -103,9 +110,9 @@ public:
 		HTTP_METHODS
 #undef HTTP_METHOD
 	};
-	static constexpr Method method2Enum(const std::string& methodName) {
+	static Method method2Enum(const std::string& methodName) {
 #define HTTP_METHOD(name)                                                                                              \
-	if (methodName == #name) {                                                                                         \
+	if (toupper(methodName) == #name) {                                                                                         \
 		return Method::name;                                                                                           \
 	}
 		HTTP_METHODS
@@ -116,20 +123,15 @@ public:
 
 	HttpRequest() = default;
 
-	HttpRequest(std::string url, std::string methodName, long timeout_ms = 0, long conn_timeout_ms = 0,
-				std::vector<std::string> headers = {}, std::string body = {})
-		: url(std::move(url)), methodName(methodName), method(method2Enum(methodName)), timeout_ms(timeout_ms),
-		  conn_timeout_ms(conn_timeout_ms), headers(std::move(headers)), body(std::move(body)) {};
-
 	std::string url;
 	std::string methodName;
-	Method method;
 	std::vector<std::string> headers; // e.g. "Content-Type: application/json"
 	std::string body;				  // request body for POST
 
 	const long timeout_ms = 0;		// optional per-request timeout (<=0 means wait indefinitely)
-	const long conn_timeout_ms = 0; // optional connection (DNS+handshake) timeout
+	const long conn_timeout_ms = 0; // optional connection (DNS + handshake) timeout
 									// (<=0 means wait indefinitely)
+	const long ttfb_timeout_ms = 0; // optional ttfb timeout (<=0 means wait indefinitely)
 };
 
 struct HttpResponse {
@@ -213,25 +215,9 @@ public:
 
 	void stop();
 
-	template <class... U> HttpResponse request(U&&... req) {
-		std::shared_ptr<TransferState> state = this->send_request(std::forward<U>(req)...);
+	HttpResponse request(HttpRequest request);
 
-		return state->future.get();
-	};
-
-	template <class... U> std::shared_ptr<TransferState> send_request(U&&... req) {
-		TransferTask task(HttpRequest{std::forward<U>(req)...});
-		std::shared_ptr<TransferState> state = task.state;
-
-		this->sema_.acquire();
-		{
-			std::unique_lock lk(this->mutex_);
-			this->requests.emplace(std::move(task));
-		}
-		curl_multi_wakeup(this->multi_);
-
-		return state;
-	};
+	std::shared_ptr<TransferState> send_request(HttpRequest request);
 
 	float uplinkSpeed() const;
 	float downlinkSpeed() const;

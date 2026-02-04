@@ -23,10 +23,10 @@ void printResponse(const http_client::HttpResponse& response) {
 void testGET() {
 	std::cout << "GET request..." << std::endl;
 
-	// Create GET request to reqbin.com echo endpoint
-	http_client::HttpRequest request("https://httpbin.org/get", "GET",
-									 5000 // 5 second timeout
-	);
+	// Create GET request to httpbin.org echo endpoint
+	http_client::HttpRequest request;
+	request.url = "https://httpbin.org/get";
+	request.methodName = "GET";
 
 	// Create HttpTransfer and perform blocking request
 	http_client::HttpTransfer transfer(request);
@@ -42,10 +42,11 @@ void testPOST() {
 	std::string jsonBody = R"({"name":"test","value":"123"})";
 
 	// Create POST request with JSON content
-	http_client::HttpRequest request("https://httpbin.org/post", "POST",
-									 5000,									// 5 second timeout
-									 0, {"Content-Type: application/json"}, // JSON content type header
-									 jsonBody);
+	http_client::HttpRequest request;
+	request.url = "https://httpbin.org/post";
+	request.methodName = "POST";
+	request.headers = {"Content-Type: application/json"};
+	request.body = jsonBody;
 
 	// Create HttpTransfer and perform blocking request
 	http_client::HttpTransfer transfer(request);
@@ -86,9 +87,11 @@ void testAsyncConcurrent() {
 					std::cout << "\n[Thread " << i << "] Sending request." << std::endl;
 				}
 
-				responses[i] = client.request("https://httpbin.org/get?thread=" + std::to_string(i), "GET",
-											  10000 // 10 second timeout
-				);
+				http_client::HttpRequest request;
+				request.url = "https://httpbin.org/get?thread=" + std::to_string(i);
+				request.methodName = "GET";
+
+				responses[i] = client.request(request);
 
 				{
 					std::lock_guard<std::mutex> lock(cout_mutex);
@@ -132,7 +135,11 @@ void testCancel() {
 
 	std::cout << "Cancel request through connection pool..." << std::endl;
 
-	auto transferState = client.send_request("https://httpbin.org/delay/10", "GET");
+	http_client::HttpRequest request;
+	request.url = "https://httpbin.org/delay/10";
+	request.methodName = "GET";
+
+	auto transferState = client.send_request(request);
 
 	auto now1 = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 	std::cout << "[" << std::put_time(std::localtime(&now1), "%Y-%m-%d %H:%M:%S") << "] " << "Wait for 3 seconds."
