@@ -28,9 +28,6 @@ target_link_libraries(HttpClient
         CURL::libcurl
 )
 
-# Examples
-if(BUILD_EXAMPLES)
-    add_executable(example examples/example.cpp)
-    target_link_libraries(example PRIVATE HttpClient)
-endif()
+add_executable(example EXCLUDE_FROM_ALL examples/example.cpp)
+target_link_libraries(example PRIVATE HttpClient)
 
