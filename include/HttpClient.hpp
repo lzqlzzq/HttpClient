@@ -36,247 +36,251 @@ namespace http_client {
 
 #define MAX_CONNECTION 8L
 #define POLL_MS 100L
+#define SPEED_TRACK_WINDOW 128L
 
-void CURL_EASY_DEFAULT_SETTING(CURL* handle);
-void CURL_MULTI_DEFAULT_SETTING(CURLM* handle);
+void CURL_EASY_DEFAULT_SETTING(CURL *handle);
+void CURL_MULTI_DEFAULT_SETTING(CURLM *handle);
 
-template<typename T,
-	class = std::enable_if_t<std::is_arithmetic<T>::value>>
+template <typename T, class = std::enable_if_t<std::is_arithmetic<T>::value>>
 class SlidingAvg {
 public:
-	explicit SlidingAvg(size_t capacity) : cap(capacity) {this->buffer.reserve(capacity);};
+  explicit SlidingAvg(size_t capacity) : cap(capacity) {
+    this->buffer.reserve(capacity);
+  };
 
-	void push(T value) {
-		if(this->size < this->cap) [[__unlikely__]] {
-			// Not full
-			this->buffer[this->head_] = value;
-			this->sum_ += value;
-			++this->size;
-            this->head_ = (this->head_ + 1) % this->cap;
-		} else {
-			// Full
-            this->sum_ -= this->buffer[this->head_];
-            this->buffer[this->head_] = value;
-            this->sum_ += value;
-            this->head_ = (this->head_ + 1) % this->cap;
-		}
-	}
-
-    double mean() const {
-        return this->size ? static_cast<double>(sum_) / this->size : 0.0;
+  void push(T value) {
+    if (this->size < this->cap) [[__unlikely__]] {
+      // Not full
+      this->buffer[this->head_] = value;
+      this->sum_ += value;
+      ++this->size;
+      this->head_ = (this->head_ + 1) % this->cap;
+    } else {
+      // Full
+      this->sum_ -= this->buffer[this->head_];
+      this->buffer[this->head_] = value;
+      this->sum_ += value;
+      this->head_ = (this->head_ + 1) % this->cap;
     }
+  }
 
-	void clear() {
-		this->head_ = 0;
-		this->size = 0;
-		std::fill(this->buffer.begin(), this->buffer.end(), 0);
-	};
+  double mean() const {
+    return this->size ? static_cast<double>(sum_) / this->size : 0.0;
+  }
+
+  void clear() {
+    this->head_ = 0;
+    this->size = 0;
+    std::fill(this->buffer.begin(), this->buffer.end(), 0);
+  };
 
 private:
-	std::vector<T> buffer;
-	size_t size = 0;
-	size_t cap = 0;
-	size_t head_ = 0;
+  std::vector<T> buffer;
+  size_t size = 0;
+  size_t cap = 0;
+  size_t head_ = 0;
 
-	double sum_ = 0.0;
+  double sum_ = 0.0;
 };
 
 class HttpRequest {
 public:
-#define HTTP_METHODS   \
-	HTTP_METHOD(GET)   \
-	HTTP_METHOD(POST)  \
-	HTTP_METHOD(HEAD)  \
-	HTTP_METHOD(PATCH) \
-	HTTP_METHOD(PUT)   \
-	HTTP_METHOD(DELETE)
+#define HTTP_METHODS                                                           \
+  HTTP_METHOD(GET)                                                             \
+  HTTP_METHOD(POST)                                                            \
+  HTTP_METHOD(HEAD)                                                            \
+  HTTP_METHOD(PATCH)                                                           \
+  HTTP_METHOD(PUT)                                                             \
+  HTTP_METHOD(DELETE)
 
-	enum Method : uint8_t {
+  enum Method : uint8_t {
 #define HTTP_METHOD(methodName) methodName,
-		HTTP_METHODS
+    HTTP_METHODS
 #undef HTTP_METHOD
-			OTHER = 255
-	};
-	static constexpr std::string_view MethodStr[] = {
+        OTHER = 255
+  };
+  static constexpr std::string_view MethodStr[] = {
 #define HTTP_METHOD(methodName) #methodName,
-		HTTP_METHODS
+      HTTP_METHODS
 #undef HTTP_METHOD
-	};
-	static constexpr Method method2Enum(const std::string& methodName) {
-#define HTTP_METHOD(name) \
-	if (methodName == #name) { return Method::name; }
-		HTTP_METHODS
+  };
+  static constexpr Method method2Enum(const std::string &methodName) {
+#define HTTP_METHOD(name)                                                      \
+  if (methodName == #name) {                                                   \
+    return Method::name;                                                       \
+  }
+    HTTP_METHODS
 #undef HTTP_METHOD
 
-		return Method::OTHER;
-	};
+    return Method::OTHER;
+  };
 
-	HttpRequest() = default;
+  HttpRequest() = default;
 
-	HttpRequest(
-		std::string url,
-		std::string methodName,
-		long conn_timeout_ms = 0,
-		long timeout_ms = 0,
-		std::vector<std::string> headers = {},
-		std::string body = {}) :
-		url(url),
-		methodName(methodName),
-		method(method2Enum(methodName)),
-		timeout_ms(timeout_ms),
-		conn_timeout_ms(conn_timeout_ms),
-		headers(headers),
-		body(body) {};
+  HttpRequest(std::string url, std::string methodName, long timeout_ms = 0,
+              long conn_timeout_ms = 0, std::vector<std::string> headers = {},
+              std::string body = {})
+      : url(url), methodName(methodName), method(method2Enum(methodName)),
+        timeout_ms(timeout_ms), conn_timeout_ms(conn_timeout_ms),
+        headers(headers), body(body) {};
 
-	std::string url;
-	std::string methodName;
-	Method method;
-	std::vector<std::string> headers;  // e.g. "Content-Type: application/json"
-	std::string body;				   // request body for POST
+  std::string url;
+  std::string methodName;
+  Method method;
+  std::vector<std::string> headers; // e.g. "Content-Type: application/json"
+  std::string body;                 // request body for POST
 
-	const long timeout_ms = 0;  // optional per-request timeout (<=0 means wait indefinitely)
-	const long conn_timeout_ms = 0;  // optional connection (DNS+handshake) timeout (<=0 means wait indefinitely)
+  const long timeout_ms =
+      0; // optional per-request timeout (<=0 means wait indefinitely)
+  const long conn_timeout_ms = 0; // optional connection (DNS+handshake) timeout
+                                  // (<=0 means wait indefinitely)
 };
 
 struct HttpResponse {
-	long status = 0;
+  long status = 0;
 
-	std::vector<std::string> headers;
-	std::string body;
-	std::string error;// non-empty on error
+  std::vector<std::string> headers;
+  std::string body;
+  std::string error; // non-empty on error
 
-	float elapsed;
+  float elapsed;
 };
 
 class HttpTransfer {
 public:
-	explicit HttpTransfer(const HttpRequest& request);
-	~HttpTransfer();
+  explicit HttpTransfer(const HttpRequest &request);
+  ~HttpTransfer();
 
-	// Moveable, Not copyable
-	HttpTransfer(const HttpTransfer&) = delete;
-	HttpTransfer& operator=(const HttpTransfer&) = delete;
-	HttpTransfer(HttpTransfer&& other) noexcept;
-	HttpTransfer& operator=(HttpTransfer&& other) noexcept;
+  // Moveable, Not copyable
+  HttpTransfer(const HttpTransfer &) = delete;
+  HttpTransfer &operator=(const HttpTransfer &) = delete;
+  HttpTransfer(HttpTransfer &&other) noexcept;
+  HttpTransfer &operator=(HttpTransfer &&other) noexcept;
 
-	const HttpResponse& getResponse() const;
-	HttpResponse detachResponse();
-	void finalize_transfer();
-	void perform_blocking();
+  const HttpResponse &getResponse() const;
+  HttpResponse detachResponse();
+  void finalize_transfer();
+  void perform_blocking();
 
 private:
-	friend class HttpClient;
+  friend class HttpClient;
 
-	CURL* curlEasy = NULL;
-	struct curl_slist* headers_ = NULL;
-	HttpResponse response;
-	std::string url;
+  CURL *curlEasy = NULL;
+  struct curl_slist *headers_ = NULL;
+  HttpResponse response;
+  std::string url;
 
-	static size_t body_cb(void* ptr, size_t size, size_t nmemb, std::string* data);
-	static size_t header_cb(void* ptr, size_t size, size_t nmemb, std::vector<std::string>* data);
+  static size_t body_cb(void *ptr, size_t size, size_t nmemb,
+                        std::string *data);
+  static size_t header_cb(void *ptr, size_t size, size_t nmemb,
+                          std::vector<std::string> *data);
 };
 
 class BoundedSemaphore {
 public:
-	explicit BoundedSemaphore(size_t initial_count, size_t max_count);
+  explicit BoundedSemaphore(size_t initial_count, size_t max_count);
 
-	// non-copyable
-	BoundedSemaphore(const BoundedSemaphore&) = delete;
+  // non-copyable
+  BoundedSemaphore(const BoundedSemaphore &) = delete;
 
-	// Acquire the semaphore (P operation)
-	void acquire();
+  // Acquire the semaphore (P operation)
+  void acquire();
 
-	// Release the semaphore (V operation)
-	void release();
+  // Release the semaphore (V operation)
+  void release();
 
 private:
-	std::mutex mutex_;
-	std::condition_variable cv_;
-	unsigned int count_;
-	const unsigned int max_count_;
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  unsigned int count_;
+  const unsigned int max_count_;
 };
 
 class HttpClient {
 public:
+  class TransferState {
+  public:
+    enum State { Ongoing, Completed, Cancel };
+    std::shared_future<HttpResponse> future;
 
-	class TransferState {
-	public:
-		enum State {
-			Ongoing, Completed, Cancel
-		};
-		std::shared_future<HttpResponse> future;
+    void cancel();
+    State get_state();
 
-		void cancel();
-		State get_state();
+  private:
+    std::atomic<State> state = State::Ongoing;
+    CURL *curl; // Only for look-up
 
-	private:
-		std::atomic<State> state = State::Ongoing;
-		CURL* curl;  // Only for look-up
+    explicit TransferState(std::shared_future<HttpResponse> &&future,
+                           CURL *curl);
 
-		explicit TransferState(std::shared_future<HttpResponse>&& future, CURL* curl);
+    friend class HttpClient;
+  };
 
-		friend class HttpClient;
-	};
+  static HttpClient &getInstance();
 
-	static HttpClient& getInstance();
+  void stop();
 
-	void stop();
+  template <class... U> HttpResponse request(U &&...req) {
+    std::shared_ptr<TransferState> state =
+        this->send_request(std::forward<U>(req)...);
 
-	template<class... U>
-	HttpResponse request(U&&... req) {
-		std::shared_ptr<TransferState> state = this->send_request(std::forward<U>(req)...);
+    return state->future.get();
+  };
 
-		return state->future.get();
-	};
+  template <class... U>
+  std::shared_ptr<TransferState> send_request(U &&...req) {
+    TransferTask task(HttpRequest{std::forward<U>(req)...});
+    std::shared_ptr<TransferState> state = task.state;
 
-	template<class... U>
-	std::shared_ptr<TransferState> send_request(U&&... req) {
-		TransferTask task(HttpRequest{std::forward<U>(req)...});
-		std::shared_ptr<TransferState> state = task.state;
+    this->sema_.acquire();
+    {
+      std::unique_lock lk(this->mutex_);
+      this->requests.emplace(std::move(task));
+    }
+    curl_multi_wakeup(this->multi_);
 
-		this->sema_.acquire();
-		{
-			std::unique_lock lk(this->mutex_);
-			this->requests.emplace(std::move(task));
-		}
-		curl_multi_wakeup(this->multi_);
+    return state;
+  };
 
-		return state;
-	};
+  float uplinkSpeed() const;
+  float downlinkSpeed() const;
 
 private:
-	HttpClient();
-	~HttpClient();
+  HttpClient();
+  ~HttpClient();
 
-	void worker_loop();
+  void worker_loop();
 
-	class TransferTask {
-	private:
-		HttpTransfer transfer;
-		std::promise<HttpResponse> promise;
-		std::shared_ptr<TransferState> state;
+  class TransferTask {
+  private:
+    HttpTransfer transfer;
+    std::promise<HttpResponse> promise;
+    std::shared_ptr<TransferState> state;
 
-		explicit TransferTask(HttpRequest r);
+    explicit TransferTask(HttpRequest r);
 
-		friend class HttpClient;
-	};
+    friend class HttpClient;
+  };
 
-	using TaskIter = std::optional<std::list<TransferTask>::iterator>;
+  using TaskIter = std::optional<std::list<TransferTask>::iterator>;
 
-	std::thread worker_;
+  std::thread worker_;
 
-	std::queue<TransferTask> requests;
-	std::list<TransferTask> transfers;
-	std::map<CURL*, TaskIter> curl2Task;
-	std::queue<CURL*> toCancelled;
+  std::queue<TransferTask> requests;
+  std::list<TransferTask> transfers;
+  std::map<CURL *, TaskIter> curl2Task;
+  std::queue<CURL *> toCancelled;
 
-	CURLM* multi_;
+  CURLM *multi_;
 
-	std::atomic<bool> stop_{false};
-	std::mutex mutex_;
-	BoundedSemaphore sema_;
+  std::atomic<bool> stop_{false};
+  std::mutex mutex_;
+  BoundedSemaphore sema_;
 
-	friend class TransferState;
+  SlidingAvg<float> uplinkAvgSpeed;
+  SlidingAvg<float> downlinkAvgSpeed;
+
+  friend class TransferState;
 };
 
-}// namespace http_client
+} // namespace http_client
