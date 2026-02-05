@@ -1,4 +1,5 @@
 #include "HttpClient.hpp"
+#include <curl/curl.h>
 #include <curl/easy.h>
 
 namespace http_client {
@@ -25,16 +26,24 @@ void CURL_MULTI_DEFAULT_SETTING(CURLM* handle) {
 }
 
 // HttpTransfer implementation
-HttpTransfer::HttpTransfer(const HttpRequest& request) : url(request.url) {
+HttpTransfer::HttpTransfer(const HttpRequest& request, const RequestPolicy& policy) {
 	this->curlEasy = curl_easy_init();
 
 	CURL_EASY_DEFAULT_SETTING(this->curlEasy);
 
 	curl_easy_setopt(this->curlEasy, CURLOPT_URL, request.url.c_str());
-	if (request.timeout_ms > 0)
-		curl_easy_setopt(this->curlEasy, CURLOPT_TIMEOUT_MS, request.timeout_ms);
-	if (request.conn_timeout_ms > 0)
-		curl_easy_setopt(this->curlEasy, CURLOPT_CONNECTTIMEOUT_MS, request.conn_timeout_ms);
+	if (policy.timeout_ms > 0)
+		curl_easy_setopt(this->curlEasy, CURLOPT_TIMEOUT_MS, policy.timeout_ms);
+	if (policy.conn_timeout_ms > 0)
+		curl_easy_setopt(this->curlEasy, CURLOPT_CONNECTTIMEOUT_MS, policy.conn_timeout_ms);
+	if (policy.send_speed_limit)
+		curl_easy_setopt(this->curlEasy, CURLOPT_MAX_SEND_SPEED_LARGE, policy.send_speed_limit);
+	if (policy.recv_speed_limit)
+		curl_easy_setopt(this->curlEasy, CURLOPT_MAX_RECV_SPEED_LARGE, policy.recv_speed_limit);
+	if (policy.low_speed_limit && policy.low_speed_time) {
+		curl_easy_setopt(this->curlEasy, CURLOPT_LOW_SPEED_LIMIT, policy.low_speed_limit);
+		curl_easy_setopt(this->curlEasy, CURLOPT_LOW_SPEED_TIME, policy.low_speed_time);
+	}
 
 	for (const auto header : request.headers) {
 		this->headers_ = curl_slist_append(this->headers_, header.c_str());
@@ -79,7 +88,7 @@ HttpTransfer::~HttpTransfer() {
 
 HttpTransfer::HttpTransfer(HttpTransfer&& other) noexcept
 	: curlEasy(std::exchange(other.curlEasy, nullptr)), headers_(std::exchange(other.headers_, nullptr)),
-	  response(std::move(other.response)), url(std::move(other.url)) {
+	  response(std::move(other.response)) {
 	if (curlEasy) {
 		curl_easy_setopt(curlEasy, CURLOPT_WRITEDATA, &response.body);
 		curl_easy_setopt(curlEasy, CURLOPT_HEADERDATA, &response.headers);
@@ -184,8 +193,8 @@ HttpClient::TransferState::State HttpClient::TransferState::get_state() {
 }
 
 // HttpClient::TransferTask implementation
-HttpClient::TransferTask::TransferTask(HttpRequest r)
-	: transfer(r), state(std::shared_ptr<TransferState>(
+HttpClient::TransferTask::TransferTask(HttpRequest r, RequestPolicy p)
+	: transfer(r, p), state(std::shared_ptr<TransferState>(
 					   new TransferState{this->promise.get_future().share(), this->transfer.curlEasy})) {};
 
 // HttpClient implementation
@@ -333,18 +342,18 @@ void HttpClient::worker_loop() {
 		}
 
 		// Add new request
-		std::vector<TransferTask> reqs;
+		std::vector<TransferTask> pendingTasks;
 		{
 			std::unique_lock<std::mutex> lk(this->mutex_);
 
-			reqs.reserve(this->requests.size());
+			pendingTasks.reserve(this->requests.size());
 			while (!this->requests.empty()) {
-				reqs.emplace_back(std::move(this->requests.front()));
+				pendingTasks.emplace_back(std::move(this->requests.front()));
 				this->requests.pop();
 			}
 		}
 
-		for (auto&& task : reqs) {
+		for (auto&& task : pendingTasks) {
 			this->transfers.emplace_back(std::move(task));
 			auto it = std::prev(this->transfers.end());
 			this->curl2Task[this->transfers.back().transfer.curlEasy] = it;
@@ -354,14 +363,14 @@ void HttpClient::worker_loop() {
 	}
 }
 
-HttpResponse HttpClient::request(HttpRequest request) {
-	std::shared_ptr<TransferState> state = this->send_request(std::move(request));
+HttpResponse HttpClient::request(HttpRequest request, RequestPolicy policy) {
+	std::shared_ptr<TransferState> state = this->send_request(std::move(request), std::move(policy));
 
 	return state->future.get();
 }
 
-std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest request) {
-	TransferTask task(std::move(request));
+std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest request, RequestPolicy policy) {
+	TransferTask task(std::move(request), std::move(policy));
 	std::shared_ptr<TransferState> state = task.state;
 
 	this->sema_.acquire();

@@ -89,6 +89,19 @@ private:
 	double sum_ = 0.0;
 };
 
+struct RequestPolicy {
+	unsigned int retries = 0;
+	uint64_t backoff_ms = 0;
+
+	uint64_t timeout_ms = 0;		// optional per-request timeout (<=0 means wait indefinitely)
+	uint64_t conn_timeout_ms = 0; // optional connection (DNS + handshake) timeout (<0 means default 300 second)
+
+	uint64_t low_speed_limit = 0; // in byte
+	uint64_t low_speed_time = 0;  // in second
+	uint64_t send_speed_limit = 0; // bytes per second
+	uint64_t recv_speed_limit = 0; // bytes per second
+};
+
 struct HttpRequest {
 public:
 #define HTTP_METHODS                                                                                                   \
@@ -121,17 +134,14 @@ public:
 		return Method::OTHER;
 	};
 
-	HttpRequest() = default;
-
 	std::string url;
 	std::string methodName;
 	std::vector<std::string> headers; // e.g. "Content-Type: application/json"
 	std::string body;				  // request body for POST
+};
 
-	const long timeout_ms = 0;		// optional per-request timeout (<=0 means wait indefinitely)
-	const long conn_timeout_ms = 0; // optional connection (DNS + handshake) timeout
-									// (<=0 means wait indefinitely)
-	const long ttfb_timeout_ms = 0; // optional ttfb timeout (<=0 means wait indefinitely)
+struct TransferInfo {
+	double connect_s, appconnect_s, pretransfer_s, starttransfer_s, total_s;
 };
 
 struct HttpResponse {
@@ -141,12 +151,13 @@ struct HttpResponse {
 	std::string body;
 	std::string error; // non-empty on error
 
-	float elapsed;
+	double elapsed;
+	TransferInfo transferInfo;
 };
 
 class HttpTransfer {
 public:
-	explicit HttpTransfer(const HttpRequest& request);
+	explicit HttpTransfer(const HttpRequest& request, const RequestPolicy& policy=RequestPolicy());
 	~HttpTransfer();
 
 	// Moveable, Not copyable
@@ -166,7 +177,7 @@ private:
 	CURL* curlEasy = NULL;
 	struct curl_slist* headers_ = NULL;
 	HttpResponse response;
-	std::string url;
+	RequestPolicy policy;
 
 	static size_t body_cb(void* ptr, size_t size, size_t nmemb, std::string* data);
 	static size_t header_cb(void* ptr, size_t size, size_t nmemb, std::vector<std::string>* data);
@@ -215,9 +226,8 @@ public:
 
 	void stop();
 
-	HttpResponse request(HttpRequest request);
-
-	std::shared_ptr<TransferState> send_request(HttpRequest request);
+	HttpResponse request(HttpRequest request, RequestPolicy policy=RequestPolicy());
+	std::shared_ptr<TransferState> send_request(HttpRequest request, RequestPolicy policy=RequestPolicy());
 
 	float uplinkSpeed() const;
 	float downlinkSpeed() const;
@@ -231,10 +241,11 @@ private:
 	class TransferTask {
 	private:
 		HttpTransfer transfer;
+		RequestPolicy policy;
 		std::promise<HttpResponse> promise;
 		std::shared_ptr<TransferState> state;
 
-		explicit TransferTask(HttpRequest r);
+		explicit TransferTask(HttpRequest r, RequestPolicy p);
 
 		friend class HttpClient;
 	};
