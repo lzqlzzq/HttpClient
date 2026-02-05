@@ -140,7 +140,7 @@ public:
 
 struct TransferInfo {
 	// In microsecond
-	uint64_t queue_s, connect_s, appconnect_s, pretransfer_s, starttransfer_s, posttransfer_s, total_s, redir_s;
+	uint64_t queue_s, connect_s, appconnect_s, pretransfer_s, posttransfer_s, starttransfer_s, receivetransfer_s, total_s, redir_s;
 };
 
 struct HttpResponse {

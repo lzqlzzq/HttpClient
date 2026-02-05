@@ -9,7 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(BUILD_EXAMPLES "Build example programs" OFF)
 
 # Find libcurl
-find_package(CURL 7.80.0 QUIET)
+find_package(CURL 8.10.0 QUIET)
 
 add_library(mycurl INTERFACE)
 
