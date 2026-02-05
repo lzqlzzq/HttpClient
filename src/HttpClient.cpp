@@ -113,7 +113,20 @@ HttpResponse HttpTransfer::detachResponse() {
 
 void HttpTransfer::finalize_transfer() {
 	curl_easy_getinfo(this->curlEasy, CURLINFO_RESPONSE_CODE, &this->response.status);
-	curl_easy_getinfo(this->curlEasy, CURLINFO_TOTAL_TIME, &this->response.elapsed);
+
+	curl_easy_getinfo(this->curlEasy, CURLINFO_QUEUE_TIME_T, &this->response.transferInfo.queue_s);
+	curl_easy_getinfo(this->curlEasy, CURLINFO_CONNECT_TIME_T, &this->response.transferInfo.connect_s);
+	curl_easy_getinfo(this->curlEasy, CURLINFO_APPCONNECT_TIME_T, &this->response.transferInfo.appconnect_s);
+	curl_easy_getinfo(this->curlEasy, CURLINFO_PRETRANSFER_TIME_T, &this->response.transferInfo.pretransfer_s);
+	curl_easy_getinfo(this->curlEasy, CURLINFO_STARTTRANSFER_TIME_T, &this->response.transferInfo.starttransfer_s);
+	curl_easy_getinfo(this->curlEasy, CURLINFO_TOTAL_TIME_T, &this->response.transferInfo.total_s);
+	curl_easy_getinfo(this->curlEasy, CURLINFO_REDIRECT_TIME_T, &this->response.transferInfo.redir_s);
+
+	this->response.transferInfo.posttransfer_s = this->response.transferInfo.total_s - this->response.transferInfo.starttransfer_s;
+	this->response.transferInfo.starttransfer_s -= this->response.transferInfo.pretransfer_s;
+	this->response.transferInfo.pretransfer_s -= this->response.transferInfo.appconnect_s;
+	this->response.transferInfo.appconnect_s -= this->response.transferInfo.connect_s;
+	this->response.transferInfo.connect_s -= this->response.transferInfo.queue_s;
 }
 
 void HttpTransfer::perform_blocking() {

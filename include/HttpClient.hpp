@@ -5,6 +5,7 @@
 #include <cassert>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <future>
 #include <list>
 #include <map>
@@ -90,9 +91,6 @@ private:
 };
 
 struct RequestPolicy {
-	unsigned int retries = 0;
-	uint64_t backoff_ms = 0;
-
 	uint64_t timeout_ms = 0;		// optional per-request timeout (<=0 means wait indefinitely)
 	uint64_t conn_timeout_ms = 0; // optional connection (DNS + handshake) timeout (<0 means default 300 second)
 
@@ -141,7 +139,8 @@ public:
 };
 
 struct TransferInfo {
-	double connect_s, appconnect_s, pretransfer_s, starttransfer_s, total_s;
+	// In microsecond
+	uint64_t queue_s, connect_s, appconnect_s, pretransfer_s, starttransfer_s, posttransfer_s, total_s, redir_s;
 };
 
 struct HttpResponse {
@@ -151,7 +150,6 @@ struct HttpResponse {
 	std::string body;
 	std::string error; // non-empty on error
 
-	double elapsed;
 	TransferInfo transferInfo;
 };
 
@@ -207,7 +205,7 @@ class HttpClient {
 public:
 	class TransferState {
 	public:
-		enum State { Ongoing, Completed, Cancel };
+		enum State { Ongoing, Completed, Failed, Cancel };
 		std::shared_future<HttpResponse> future;
 
 		void cancel();
