@@ -1,4 +1,5 @@
 #include "HttpClient.hpp"
+#include <atomic>
 #include <curl/curl.h>
 #include <curl/easy.h>
 #include <thread>
@@ -176,6 +177,15 @@ void BoundedSemaphore::acquire() {
 	--count_;
 }
 
+bool BoundedSemaphore::try_acquire() {
+	std::unique_lock<std::mutex> lock(mutex_);
+	if(count_ >= 1) {
+		--count_;
+		return true;
+	}
+	return false;
+}
+
 void BoundedSemaphore::release() {
 	std::unique_lock<std::mutex> lock(mutex_);
 	if (count_ < max_count_) {
@@ -189,8 +199,22 @@ HttpClient::TransferState::TransferState(std::shared_future<HttpResponse>&& futu
 	: future(future), curl(curl) {}
 
 void HttpClient::TransferState::cancel() {
+	state.store(State::Cancel, std::memory_order_release);
+
+	HttpClient& httpClient = HttpClient::getInstance();
+
+	{
+		std::unique_lock<std::mutex> lk(httpClient.mutex_);
+		httpClient.toCancelled.emplace(this->curl);
+
+		curl_multi_wakeup(httpClient.multi_);
+	}
+}
+
+void HttpClient::TransferState::pause() {
 	State expected = State::Ongoing;
-	if (!state.compare_exchange_strong(expected, State::Cancel, std::memory_order_acq_rel)) {
+	if (!state.compare_exchange_strong(expected, State::Pause, std::memory_order_acq_rel)) {
+		// If not from Ongoing, discard
 		return;
 	}
 
@@ -198,7 +222,24 @@ void HttpClient::TransferState::cancel() {
 
 	{
 		std::unique_lock<std::mutex> lk(httpClient.mutex_);
-		httpClient.toCancelled.emplace(this->curl);
+		httpClient.toPaused.emplace(this->curl);
+
+		curl_multi_wakeup(httpClient.multi_);
+	}
+}
+
+void HttpClient::TransferState::resume() {
+	State expected = State::Paused;
+	if (!state.compare_exchange_strong(expected, State::Ongoing, std::memory_order_acq_rel)) {
+		// If not from Paused, discard
+		return;
+	}
+
+	HttpClient& httpClient = HttpClient::getInstance();
+
+	{
+		std::unique_lock<std::mutex> lk(httpClient.mutex_);
+		httpClient.toResumed.emplace(this->curl);
 
 		curl_multi_wakeup(httpClient.multi_);
 	}
@@ -322,39 +363,89 @@ void HttpClient::worker_loop() {
 					std::make_exception_ptr(std::runtime_error("The HttpClient stopped while task in the pool.")));
 			}
 
-			transfers.clear();
 			// Exit the worker loop
 			break;
 		}
 
 		// Handle cancel
+		std::vector<CURL*> cancels;
 		{
-			std::vector<CURL*> cancels;
-			{
-				std::lock_guard<std::mutex> lk(this->mutex_);
-				while (!this->toCancelled.empty()) {
-					cancels.push_back(this->toCancelled.front());
-					this->toCancelled.pop();
-				}
+			std::lock_guard<std::mutex> lk(this->mutex_);
+			while (!this->toCancelled.empty()) {
+				cancels.push_back(this->toCancelled.front());
+				this->toCancelled.pop();
 			}
+		}
 
-			for (CURL* curlEasy : cancels) {
-				if (!curlEasy)
-					continue;
+		for (CURL* curlEasy : cancels) {
+			if (!curlEasy)
+				continue;
 
-				auto mit = this->curl2Task.find(curlEasy);
-				if (mit == this->curl2Task.end() || !mit->second)
-					continue;
+			auto mit = this->curl2Task.find(curlEasy);
+			if (mit == this->curl2Task.end() || !mit->second)
+				continue;
 
-				auto it = mit->second.value();
+			auto it = mit->second.value();
 
-				curl_multi_remove_handle(this->multi_, curlEasy);
+			curl_multi_remove_handle(this->multi_, curlEasy);
+			this->sema_.release();
+			it->promise.set_exception(std::make_exception_ptr(std::runtime_error("The task is cancelled.")));
+
+			this->curl2Task.erase(curlEasy);
+			this->transfers.erase(it);
+		}
+
+		// Handle pause
+		std::vector<CURL*> pauses;
+		{
+			std::lock_guard<std::mutex> lk(this->mutex_);
+			while (!this->toPaused.empty()) {
+				pauses.push_back(this->toPaused.front());
+				this->toPaused.pop();
+			}
+		}
+
+		for (CURL* curlEasy : pauses) {
+			if (!curlEasy)
+				continue;
+
+			auto mit = this->curl2Task.find(curlEasy);
+			if (mit == this->curl2Task.end() || !mit->second)
+				continue;
+
+			auto it = mit->second.value();
+			curl_easy_pause(curlEasy, CURLPAUSE_ALL);
+			it->state->state.store(TransferState::Paused, std::memory_order_release);
+			this->sema_.release();
+		}
+
+		// Handle resumes
+		std::vector<CURL*> resumes;
+		{
+			std::lock_guard<std::mutex> lk(this->mutex_);
+			while (!this->toResumed.empty()) {
+				// Acquire semaphore before pop, leave remaining for next epoch
+				if (!this->sema_.try_acquire())
+					break;
+				resumes.push_back(this->toResumed.front());
+				this->toResumed.pop();
+			}
+		}
+
+		for (CURL* curlEasy : resumes) {
+			if (!curlEasy) {
 				this->sema_.release();
-				it->promise.set_exception(std::make_exception_ptr(std::runtime_error("The task is cancelled.")));
-
-				this->curl2Task.erase(curlEasy);
-				this->transfers.erase(it);
+				continue;
 			}
+
+			auto mit = this->curl2Task.find(curlEasy);
+			if (mit == this->curl2Task.end() || !mit->second) {
+				this->sema_.release();
+				continue;
+			}
+
+			auto it = mit->second.value();
+			curl_easy_pause(curlEasy, CURLPAUSE_CONT);
 		}
 
 		// Add new request

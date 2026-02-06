@@ -192,6 +192,9 @@ public:
 	// Acquire the semaphore (P operation)
 	void acquire();
 
+	// Acquire the semaphore (Non-blocking)
+	bool try_acquire();
+
 	// Release the semaphore (V operation)
 	void release();
 
@@ -206,9 +209,11 @@ class HttpClient {
 public:
 	class TransferState {
 	public:
-		enum State { Ongoing, Completed, Failed, Cancel };
+		enum State { Pending, Ongoing, Completed, Pause, Paused, Failed, Cancel };
 		std::shared_future<HttpResponse> future;
 
+		void pause();
+		void resume();
 		void cancel();
 		State get_state();
 
@@ -257,6 +262,8 @@ private:
 	std::list<TransferTask> transfers;
 	std::map<CURL*, TaskIter> curl2Task;
 	std::queue<CURL*> toCancelled;
+	std::queue<CURL*> toPaused;
+	std::queue<CURL*> toResumed;
 
 	CURLM* multi_;
 

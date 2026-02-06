@@ -11,7 +11,7 @@
 #include <vector>
 
 void printResponse(const http_client::HttpResponse& response) {
-	std::cout << "Elapsed: " << response.transferInfo.total_s << "s" << std::endl;
+	std::cout << "Elapsed: " << response.transferInfo.total_s / 10e-6 << "s" << std::endl;
 	std::cout << "Status: " << response.status << std::endl;
 	std::cout << "Headers:" << std::endl;
 	for (const auto& h : response.headers) {
@@ -151,6 +151,65 @@ void testCancel() {
 			  << std::endl;
 }
 
+void testPauseResume() {
+	auto& client = http_client::HttpClient::getInstance();
+
+	std::cout << "Pause and Resume request test..." << std::endl;
+
+	// Use a large file download to test pause/resume
+	http_client::HttpRequest request;
+	request.url = "https://httpbin.org/drip?duration=10&numbytes=1000&code=200&delay=0";
+	request.methodName = "GET";
+
+	auto transferState = client.send_request(request);
+
+	auto printTime = []() {
+		auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+		std::cout << "[" << std::put_time(std::localtime(&now), "%Y-%m-%d %H:%M:%S") << "] ";
+	};
+
+	// Wait for transfer to start
+	std::this_thread::sleep_for(std::chrono::seconds(1));
+	printTime();
+	std::cout << "State: " << static_cast<int>(transferState->get_state()) << " (Ongoing=1)" << std::endl;
+
+	// Pause the transfer
+	printTime();
+	std::cout << "Pausing transfer..." << std::endl;
+	transferState->pause();
+
+	// Wait a bit for pause to take effect
+	std::this_thread::sleep_for(std::chrono::milliseconds(500));
+	printTime();
+	std::cout << "State after pause: " << static_cast<int>(transferState->get_state()) << " (Paused=4)" << std::endl;
+
+	// Wait while paused
+	printTime();
+	std::cout << "Waiting 3 seconds while paused..." << std::endl;
+	std::this_thread::sleep_for(std::chrono::seconds(3));
+
+	// Resume the transfer
+	printTime();
+	std::cout << "Resuming transfer..." << std::endl;
+	transferState->resume();
+
+	// Wait a bit for resume to take effect
+	std::this_thread::sleep_for(std::chrono::milliseconds(500));
+	printTime();
+	std::cout << "State after resume: " << static_cast<int>(transferState->get_state()) << " (Ongoing=1)" << std::endl;
+
+	// Wait for completion
+	try {
+		auto response = transferState->future.get();
+		printTime();
+		std::cout << "Transfer completed!" << std::endl;
+		printResponse(response);
+	} catch (const std::exception& e) {
+		printTime();
+		std::cerr << "Transfer failed: " << e.what() << std::endl;
+	}
+}
+
 int main() {
 	std::cout << "========================================" << std::endl;
 	std::cout << "   HttpClient.hpp Example" << std::endl;
@@ -181,6 +240,11 @@ int main() {
 		// Test 4: Test cancel
 		std::cout << "\n[4] Cancel Request" << std::endl;
 		testCancel();
+
+		// Test 5: Test pause and resume
+		std::cout << "\n[5] Pause and Resume Request" << std::endl;
+		std::cout << "----------------------------------------" << std::endl;
+		testPauseResume();
 
 		auto& client = http_client::HttpClient::getInstance();
 
