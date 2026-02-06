@@ -398,4 +398,43 @@ std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest 
 	return state;
 }
 
+float jitter_generator(float max) {
+    max = std::max(0.0f, max);
+    if (max == 0.0) return 0.0;
+
+    thread_local std::mt19937_64 rg{
+        [] {
+            std::random_device rd;
+            std::seed_seq seq{
+                rd(), rd(), rd(), rd(),
+                static_cast<unsigned>(
+                    std::hash<std::thread::id>{}(std::this_thread::get_id()))
+            };
+            return std::mt19937_64(seq);
+        }()
+    };
+
+    // ---- sigma scaling with max ----
+    const float ref       = 1e-3;  // 1ms
+    const float sigma_min = 0.3;
+    const float sigma_max = 1.5;
+
+    float sigma = std::clamp(
+        0.4f + 0.3f * std::log1p(max / ref),
+        sigma_min,
+        sigma_max
+    );
+
+    // median ≈ 5% of max
+    float mu = std::log(0.05 * max + 1e-12);
+
+    std::lognormal_distribution<float> mag_dist(mu, sigma);
+    std::bernoulli_distribution sign_dist(0.5);
+
+    float mag = mag_dist(rg);
+    if (mag > max) mag = max;
+
+    return sign_dist(rg) ? mag : -mag;
+}
+
 } // namespace http_client

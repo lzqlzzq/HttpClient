@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <random>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -268,5 +269,7 @@ private:
 
 	friend class TransferState;
 };
+
+float jitter_generator(float max);    // In second
 
 } // namespace http_client
