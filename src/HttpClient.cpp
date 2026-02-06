@@ -69,7 +69,7 @@ HttpTransfer::HttpTransfer(const HttpRequest& request, const RequestPolicy& poli
 			break;
 		}
 		default: {
-			curl_easy_setopt(this->curlEasy, CURLOPT_CUSTOMREQUEST, toupper(request.methodName).c_str());
+			curl_easy_setopt(this->curlEasy, CURLOPT_CUSTOMREQUEST, util::toupper(request.methodName).c_str());
 			if (request.body.size()) {
 				curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDS, request.body.c_str());
 				curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDSIZE, request.body.size());

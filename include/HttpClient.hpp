@@ -42,13 +42,17 @@ namespace http_client {
 void CURL_EASY_DEFAULT_SETTING(CURL* handle);
 void CURL_MULTI_DEFAULT_SETTING(CURLM* handle);
 
-static std::string toupper(const std::string& str) {
+namespace util {
+
+	static std::string toupper(const std::string& str) {
 	std::string s(str);
 	for (char& c : s)
 		if (c >= 'a' && c <= 'z')
 			c -= 32;
 	return s;
 };
+
+}
 
 template <typename T, class = std::enable_if_t<std::is_arithmetic<T>::value>> class SlidingAvg {
 public:
@@ -124,7 +128,7 @@ public:
 	};
 	static Method method2Enum(const std::string& methodName) {
 #define HTTP_METHOD(name)                                                                                              \
-	if (toupper(methodName) == #name) {                                                                                         \
+	if (util::toupper(methodName) == #name) {                                                                                         \
 		return Method::name;                                                                                           \
 	}
 		HTTP_METHODS
