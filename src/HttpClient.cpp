@@ -46,6 +46,10 @@ HttpTransfer::HttpTransfer(const HttpRequest& request, const RequestPolicy& poli
 		curl_easy_setopt(this->curlEasy, CURLOPT_LOW_SPEED_LIMIT, policy.low_speed_limit);
 		curl_easy_setopt(this->curlEasy, CURLOPT_LOW_SPEED_TIME, policy.low_speed_time);
 	}
+	if (policy.curl_buffer_size) {
+		unsigned long buf_size = std::clamp(policy.curl_buffer_size, 1024u, static_cast<unsigned int>(CURL_MAX_READ_SIZE));
+		curl_easy_setopt(this->curlEasy, CURLOPT_BUFFERSIZE, buf_size);
+	}
 
 	for (const auto header : request.headers) {
 		this->headers_ = curl_slist_append(this->headers_, header.c_str());

@@ -96,13 +96,15 @@ private:
 };
 
 struct RequestPolicy {
-	uint64_t timeout_ms = 0;		// optional per-request timeout (<=0 means wait indefinitely)
-	uint64_t conn_timeout_ms = 0; // optional connection (DNS + handshake) timeout (<0 means default 300 second)
+	uint32_t timeout_ms = 0;		// optional per-request timeout (<=0 means wait indefinitely)
+	uint32_t conn_timeout_ms = 0; // optional connection (DNS + handshake) timeout (<0 means default 300 second)
 
-	uint64_t low_speed_limit = 0; // in byte
-	uint64_t low_speed_time = 0;  // in second
-	uint64_t send_speed_limit = 0; // bytes per second
-	uint64_t recv_speed_limit = 0; // bytes per second
+	uint32_t low_speed_limit = 0; // in byte
+	uint32_t low_speed_time = 0;  // in second
+	uint32_t send_speed_limit = 0; // bytes per second
+	uint32_t recv_speed_limit = 0; // bytes per second
+
+	uint32_t curl_buffer_size = CURL_MAX_WRITE_SIZE; // in byte
 };
 
 struct HttpRequest {
