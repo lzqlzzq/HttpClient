@@ -14,34 +14,32 @@ find_package(CURL 8.10.0 QUIET)
 add_library(mycurl INTERFACE)
 
 if (CURL_FOUND)
-  message(STATUS "Using system libcurl: ${CURL_VERSION_STRING}")
-  target_link_libraries(mycurl INTERFACE CURL::libcurl)
+    message(STATUS "Using system libcurl: ${CURL_VERSION_STRING}")
+    target_link_libraries(mycurl INTERFACE CURL::libcurl)
 else()
     message(STATUS "System libcurl not found or too old; building vendored curl")
 
-    # Minimal http client
+    include(FetchContent)
+
+    # Build configuration
     set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(BUILD_LIBCURL_DOCS OFF CACHE BOOL "" FORCE)
+
+    # Protocol configuration - HTTP(S) only
     set(HTTP_ONLY ON CACHE BOOL "" FORCE)
 
-    set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
-    set(CURL_USE_PKGCONFIG OFF CACHE BOOL "" FORCE)
+    # Fetch curl from GitHub
+    FetchContent_Declare(
+        curl
+        GIT_REPOSITORY https://github.com/curl/curl.git
+        GIT_TAG        curl-8_11_1
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(curl)
 
-    set(CURL_DISABLE_LDAP ON CACHE BOOL "" FORCE)
-    set(CURL_DISABLE_LDAPS ON CACHE BOOL "" FORCE)
-
-    # Just use system openssl
-    set(CURL_USE_SECTRANSP ON CACHE BOOL "" FORCE)
-    set(CMAKE_USE_SECTRANSP ON CACHE BOOL "" FORCE)
-    set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
-    set(CMAKE_USE_OPENSSL OFF CACHE BOOL "" FORCE)
-
-    add_subdirectory(3rdparty/curl EXCLUDE_FROM_ALL)
-
-    target_link_libraries(mycurl INTERFACE libcurl)
-
-    # Windows likes static lib
+    target_link_libraries(mycurl INTERFACE libcurl_static)
     target_compile_definitions(mycurl INTERFACE CURL_STATICLIB)
 endif()
 
@@ -55,11 +53,8 @@ add_library(HttpClient
 target_include_directories(HttpClient
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE
-        MyCurl::curl
 )
 target_link_libraries(HttpClient PRIVATE MyCurl::curl)
 
 add_executable(example EXCLUDE_FROM_ALL examples/example.cpp)
 target_link_libraries(example PRIVATE HttpClient)
-
