@@ -1,6 +1,7 @@
 #include "HttpClient.hpp"
 #include <curl/curl.h>
 #include <curl/easy.h>
+#include <thread>
 
 namespace http_client {
 
@@ -389,6 +390,8 @@ std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest 
 	std::shared_ptr<TransferState> state = task.state;
 
 	this->sema_.acquire();
+	std::this_thread::sleep_for(std::chrono::duration<float, std::milli>(std::abs(jitter_generator(10))));
+
 	{
 		std::unique_lock lk(this->mutex_);
 		this->requests.emplace(std::move(task));
