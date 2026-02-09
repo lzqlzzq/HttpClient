@@ -316,6 +316,14 @@ float HttpClient::downlinkSpeed() const {
 	return this->downlinkAvgSpeed.mean();
 }
 
+float HttpClient::peakUplinkSpeed() const {
+	return this->uplinkAvgSpeed.max();
+}
+
+float HttpClient::peakDownlinkSpeed() const {
+	return this->downlinkAvgSpeed.max();
+}
+
 void HttpClient::worker_loop() {
 	while (1) {
 		int still_running = 0;

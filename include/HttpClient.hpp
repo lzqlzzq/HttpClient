@@ -54,9 +54,9 @@ static std::string toupper(const std::string& str) {
 
 }
 
-template <typename T, class = std::enable_if_t<std::is_arithmetic<T>::value>> class SlidingAvg {
+template <typename T, class = std::enable_if_t<std::is_arithmetic<T>::value>> class SlidingWindow {
 public:
-	explicit SlidingAvg(size_t capacity) : cap(capacity) {
+	explicit SlidingWindow(size_t capacity) : cap(capacity) {
 		this->buffer.reserve(capacity);
 	};
 
@@ -78,6 +78,10 @@ public:
 
 	double mean() const {
 		return this->size ? static_cast<double>(sum_) / this->size : 0.0;
+	}
+
+	double max() const {
+		return std::max_element(this->buffer.begin(), this->buffer.end());
 	}
 
 	void clear() {
@@ -246,6 +250,9 @@ public:
 	float uplinkSpeed() const;
 	float downlinkSpeed() const;
 
+	float peakUplinkSpeed() const;
+	float peakDownlinkSpeed() const;
+
 private:
 	HttpClient();
 	~HttpClient();
@@ -281,8 +288,8 @@ private:
 	std::mutex mutex_;
 	BoundedSemaphore sema_;
 
-	SlidingAvg<float> uplinkAvgSpeed;
-	SlidingAvg<float> downlinkAvgSpeed;
+	SlidingWindow<float> uplinkAvgSpeed;
+	SlidingWindow<float> downlinkAvgSpeed;
 
 	friend class TransferState;
 };
