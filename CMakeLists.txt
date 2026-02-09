@@ -10,6 +10,7 @@ option(BUILD_EXAMPLES "Build example programs" OFF)
 
 # Find libcurl
 find_package(CURL 8.10.0 QUIET)
+find_package(OpenSSL REQUIRED)
 
 add_library(mycurl INTERFACE)
 
@@ -49,12 +50,13 @@ add_library(MyCurl::curl ALIAS mycurl)
 # HttpClient library
 add_library(HttpClient
     src/HttpClient.cpp
+    src/HashHelper.cpp
 )
 target_include_directories(HttpClient
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(HttpClient PRIVATE MyCurl::curl)
+target_link_libraries(HttpClient PRIVATE MyCurl::curl OpenSSL::Crypto)
 
 add_executable(example EXCLUDE_FROM_ALL examples/example.cpp)
 target_link_libraries(example PRIVATE HttpClient)
