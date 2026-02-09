@@ -71,7 +71,7 @@ Hash& Hash::operator=(Hash&& other) noexcept {
 		EVP_MD_CTX_free(ctx_);
 		this->ctx_ = std::exchange(other.ctx_, nullptr);
 		this->md_ = std::exchange(other.md_, nullptr);
-		this->finalized_ = std::exchange(other.finalized_, nullptr);
+		this->finalized_ = std::exchange(other.finalized_, false);
 		this->cached_result_ = std::move(other.cached_result_);
 	}
 	return *this;

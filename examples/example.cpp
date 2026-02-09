@@ -11,7 +11,7 @@
 #include <vector>
 
 void printResponse(const http_client::HttpResponse& response) {
-	std::cout << "Elapsed: " << response.transferInfo.total_s / 10e-6 << "s" << std::endl;
+	std::cout << "Elapsed: " << response.transferInfo.total << "s" << std::endl;
 	std::cout << "Status: " << response.status << std::endl;
 	std::cout << "Headers:" << std::endl;
 	for (const auto& h : response.headers) {
@@ -97,7 +97,7 @@ void testAsyncConcurrent() {
 					std::lock_guard<std::mutex> lock(cout_mutex);
 					std::cout << "[Thread " << i << "] Response received:" << std::endl;
 					std::cout << "  Status: " << responses[i].status << std::endl;
-					std::cout << "  Elapsed: " << responses[i].transferInfo.total_s << "s" << std::endl;
+					std::cout << "  Elapsed: " << responses[i].transferInfo.total << "s" << std::endl;
 					std::cout << "  Error: " << responses[i].error << std::endl;
 					std::cout << "  Body length: " << responses[i].body.length() << std::endl;
 

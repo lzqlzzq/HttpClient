@@ -76,12 +76,13 @@ public:
 		}
 	}
 
-	double mean() const {
+	T mean() const {
 		return this->size ? static_cast<double>(sum_) / this->size : 0.0;
 	}
 
-	double max() const {
-		return std::max_element(this->buffer.begin(), this->buffer.end());
+	T max() const {
+		auto it = std::max_element(this->buffer.begin(), this->buffer.end());
+		return it == this->buffer.end() ? 0 : *it;
 	}
 
 	void clear() {
@@ -151,11 +152,11 @@ public:
 
 struct TransferInfo {
 
-	// In microsecond
-	uint64_t start_at = std::chrono::time_point_cast<std::chrono::microseconds>(
-		std::chrono::system_clock::now()).time_since_epoch().count();
-	uint64_t queue_s = 0, connect_s = 0, appconnect_s = 0, pretransfer_s = 0, posttransfer_s = 0, ttfb = 0, starttransfer_s = 0, receivetransfer_s = 0, total_s = 0, redir_s = 0;
-	uint64_t complete_at = 0;
+	// In second
+	double startAt = std::chrono::duration<double>(
+		std::chrono::system_clock::now().time_since_epoch()).count();
+	float queue = 0, connect = 0, appConnect = 0, preTransfer = 0, postTransfer = 0, ttfb = 0, startTransfer = 0, receiveTransfer = 0, total = 0, redir = 0;
+	double completeAt = 0;
 };
 
 struct HttpResponse {
@@ -224,7 +225,7 @@ class HttpClient {
 public:
 	class TransferState {
 	public:
-		enum State { Pending, Ongoing, Completed, Pause, Paused, Failed, Cancel };
+		enum State { Pending, Ongoing, Completed, Pause, Paused, Resume, Failed, Cancel };
 		std::shared_future<HttpResponse> future;
 
 		void pause();
@@ -258,8 +259,6 @@ private:
 	HttpClient();
 	~HttpClient();
 
-	void worker_loop();
-
 	class TransferTask {
 	private:
 		HttpTransfer transfer;
@@ -272,6 +271,12 @@ private:
 		friend class HttpClient;
 	};
 
+	void worker_loop();
+	void handle_events();
+	void handle_cancel(TransferTask& task);
+	void handle_pause(TransferTask& task);
+	void handle_resume(TransferTask& task);
+
 	using TaskIter = std::optional<std::list<TransferTask>::iterator>;
 
 	std::thread worker_;
@@ -279,9 +284,7 @@ private:
 	std::queue<TransferTask> requests;
 	std::list<TransferTask> transfers;
 	std::map<CURL*, TaskIter> curl2Task;
-	std::queue<CURL*> toCancelled;
-	std::queue<CURL*> toPaused;
-	std::queue<CURL*> toResumed;
+	std::queue<CURL*> events_;
 
 	CURLM* multi_;
 

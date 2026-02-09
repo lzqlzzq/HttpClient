@@ -122,24 +122,29 @@ HttpResponse HttpTransfer::detachResponse() {
 void HttpTransfer::finalize_transfer() {
 	curl_easy_getinfo(this->curlEasy, CURLINFO_RESPONSE_CODE, &this->response.status);
 
-	curl_easy_getinfo(this->curlEasy, CURLINFO_QUEUE_TIME_T, &this->response.transferInfo.queue_s);
-	curl_easy_getinfo(this->curlEasy, CURLINFO_CONNECT_TIME_T, &this->response.transferInfo.connect_s);
-	curl_easy_getinfo(this->curlEasy, CURLINFO_APPCONNECT_TIME_T, &this->response.transferInfo.appconnect_s);
-	curl_easy_getinfo(this->curlEasy, CURLINFO_PRETRANSFER_TIME_T, &this->response.transferInfo.pretransfer_s);
-	curl_easy_getinfo(this->curlEasy, CURLINFO_POSTTRANSFER_TIME_T, &this->response.transferInfo.posttransfer_s);
-	curl_easy_getinfo(this->curlEasy, CURLINFO_STARTTRANSFER_TIME_T, &this->response.transferInfo.starttransfer_s);
-	curl_easy_getinfo(this->curlEasy, CURLINFO_TOTAL_TIME_T, &this->response.transferInfo.total_s);
-	curl_easy_getinfo(this->curlEasy, CURLINFO_REDIRECT_TIME_T, &this->response.transferInfo.redir_s);
+	curl_off_t queue, connect, appConnect, preTransfer, postTransfer, startTransfer, total, redir;
+	curl_easy_getinfo(this->curlEasy, CURLINFO_QUEUE_TIME_T, &queue);
+	curl_easy_getinfo(this->curlEasy, CURLINFO_CONNECT_TIME_T, &connect);
+	curl_easy_getinfo(this->curlEasy, CURLINFO_APPCONNECT_TIME_T, &appConnect);
+	curl_easy_getinfo(this->curlEasy, CURLINFO_PRETRANSFER_TIME_T, &preTransfer);
+	curl_easy_getinfo(this->curlEasy, CURLINFO_POSTTRANSFER_TIME_T, &postTransfer);
+	curl_easy_getinfo(this->curlEasy, CURLINFO_STARTTRANSFER_TIME_T, &startTransfer);
+	curl_easy_getinfo(this->curlEasy, CURLINFO_TOTAL_TIME_T, &total);
+	curl_easy_getinfo(this->curlEasy, CURLINFO_REDIRECT_TIME_T, &redir);
 
-	this->response.transferInfo.receivetransfer_s = this->response.transferInfo.total_s - this->response.transferInfo.starttransfer_s;
-	this->response.transferInfo.starttransfer_s -= this->response.transferInfo.posttransfer_s;
-	this->response.transferInfo.posttransfer_s -= this->response.transferInfo.pretransfer_s;
-	this->response.transferInfo.pretransfer_s -= this->response.transferInfo.appconnect_s;
-	this->response.transferInfo.appconnect_s -= this->response.transferInfo.connect_s;
-	this->response.transferInfo.connect_s -= this->response.transferInfo.queue_s;
+	constexpr float us2s = 1e-6f;
+	this->response.transferInfo.queue = queue * us2s;
+	this->response.transferInfo.connect = (connect - queue) * us2s;
+	this->response.transferInfo.appConnect = (appConnect - connect) * us2s;
+	this->response.transferInfo.preTransfer = (preTransfer - appConnect) * us2s;
+	this->response.transferInfo.postTransfer = (postTransfer - preTransfer) * us2s;
+	this->response.transferInfo.startTransfer = (startTransfer - postTransfer) * us2s;
+	this->response.transferInfo.receiveTransfer = (total - startTransfer) * us2s;
+	this->response.transferInfo.total = total * us2s;
+	this->response.transferInfo.redir = redir * us2s;
 
-	this->response.transferInfo.complete_at = std::chrono::time_point_cast<std::chrono::microseconds>(
-		std::chrono::system_clock::now()).time_since_epoch().count();
+	this->response.transferInfo.completeAt = std::chrono::duration<double>(
+		std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
 void HttpTransfer::perform_blocking() {
@@ -150,9 +155,9 @@ void HttpTransfer::perform_blocking() {
 size_t HttpTransfer::body_cb(void* ptr, size_t size, size_t nmemb, void* data) {
 	HttpTransfer* transfer = static_cast<HttpTransfer*>(data);
 	if(transfer->response.transferInfo.ttfb == 0)
-		transfer->response.transferInfo.ttfb = std::chrono::time_point_cast<std::chrono::microseconds>(
-			std::chrono::system_clock::now()).time_since_epoch().count() - \
-			transfer->response.transferInfo.start_at;
+		transfer->response.transferInfo.ttfb = std::chrono::duration<double>(
+			std::chrono::system_clock::now().time_since_epoch()).count() - \
+			transfer->response.transferInfo.startAt;
 	if(transfer->contentLength > transfer->response.body.capacity())
 		transfer->response.body.reserve(transfer->contentLength);
 
@@ -231,10 +236,9 @@ void HttpClient::TransferState::cancel() {
 
 	{
 		std::unique_lock<std::mutex> lk(httpClient.mutex_);
-		httpClient.toCancelled.emplace(this->curl);
-
-		curl_multi_wakeup(httpClient.multi_);
+		httpClient.events_.emplace(this->curl);
 	}
+	curl_multi_wakeup(httpClient.multi_);
 }
 
 void HttpClient::TransferState::pause() {
@@ -248,15 +252,14 @@ void HttpClient::TransferState::pause() {
 
 	{
 		std::unique_lock<std::mutex> lk(httpClient.mutex_);
-		httpClient.toPaused.emplace(this->curl);
-
-		curl_multi_wakeup(httpClient.multi_);
+		httpClient.events_.emplace(this->curl);
 	}
+	curl_multi_wakeup(httpClient.multi_);
 }
 
 void HttpClient::TransferState::resume() {
 	State expected = State::Paused;
-	if (!state.compare_exchange_strong(expected, State::Ongoing, std::memory_order_acq_rel)) {
+	if (!state.compare_exchange_strong(expected, State::Resume, std::memory_order_acq_rel)) {
 		// If not from Paused, discard
 		return;
 	}
@@ -265,10 +268,9 @@ void HttpClient::TransferState::resume() {
 
 	{
 		std::unique_lock<std::mutex> lk(httpClient.mutex_);
-		httpClient.toResumed.emplace(this->curl);
-
-		curl_multi_wakeup(httpClient.multi_);
+		httpClient.events_.emplace(this->curl);
 	}
+	curl_multi_wakeup(httpClient.multi_);
 }
 
 HttpClient::TransferState::State HttpClient::TransferState::get_state() {
@@ -366,10 +368,6 @@ void HttpClient::worker_loop() {
 					it->state->state.store(TransferState::State::Completed, std::memory_order_release);
 					this->curl2Task.erase(easy);
 					this->transfers.erase(it);
-				} else {
-#ifndef DNDEBUG
-					throw std::runtime_error("Dangling CURL pointer detected!");
-#endif
 				}
 			}
 		} while (msg);
@@ -401,86 +399,8 @@ void HttpClient::worker_loop() {
 			break;
 		}
 
-		// Handle cancel
-		std::vector<CURL*> cancels;
-		{
-			std::lock_guard<std::mutex> lk(this->mutex_);
-			while (!this->toCancelled.empty()) {
-				cancels.push_back(this->toCancelled.front());
-				this->toCancelled.pop();
-			}
-		}
-
-		for (CURL* curlEasy : cancels) {
-			if (!curlEasy)
-				continue;
-
-			auto mit = this->curl2Task.find(curlEasy);
-			if (mit == this->curl2Task.end() || !mit->second)
-				continue;
-
-			auto it = mit->second.value();
-
-			curl_multi_remove_handle(this->multi_, curlEasy);
-			this->sema_.release();
-			it->promise.set_exception(std::make_exception_ptr(std::runtime_error("The task is cancelled.")));
-
-			this->curl2Task.erase(curlEasy);
-			this->transfers.erase(it);
-		}
-
-		// Handle pause
-		std::vector<CURL*> pauses;
-		{
-			std::lock_guard<std::mutex> lk(this->mutex_);
-			while (!this->toPaused.empty()) {
-				pauses.push_back(this->toPaused.front());
-				this->toPaused.pop();
-			}
-		}
-
-		for (CURL* curlEasy : pauses) {
-			if (!curlEasy)
-				continue;
-
-			auto mit = this->curl2Task.find(curlEasy);
-			if (mit == this->curl2Task.end() || !mit->second)
-				continue;
-
-			auto it = mit->second.value();
-			curl_easy_pause(curlEasy, CURLPAUSE_ALL);
-			it->state->state.store(TransferState::Paused, std::memory_order_release);
-			this->sema_.release();
-		}
-
-		// Handle resumes
-		std::vector<CURL*> resumes;
-		{
-			std::lock_guard<std::mutex> lk(this->mutex_);
-			while (!this->toResumed.empty()) {
-				// Acquire semaphore before pop, leave remaining for next epoch
-				if (!this->sema_.try_acquire())
-					break;
-				resumes.push_back(this->toResumed.front());
-				this->toResumed.pop();
-			}
-		}
-
-		for (CURL* curlEasy : resumes) {
-			if (!curlEasy) {
-				this->sema_.release();
-				continue;
-			}
-
-			auto mit = this->curl2Task.find(curlEasy);
-			if (mit == this->curl2Task.end() || !mit->second) {
-				this->sema_.release();
-				continue;
-			}
-
-			auto it = mit->second.value();
-			curl_easy_pause(curlEasy, CURLPAUSE_CONT);
-		}
+		// Handle events
+		this->handle_events();
 
 		// Add new request
 		std::vector<TransferTask> pendingTasks;
@@ -502,6 +422,70 @@ void HttpClient::worker_loop() {
 			curl_multi_add_handle(this->multi_, this->transfers.back().transfer.curlEasy);
 		}
 	}
+}
+
+void HttpClient::handle_events() {
+	std::vector<CURL*> events;
+	{
+		std::lock_guard<std::mutex> lk(this->mutex_);
+		while (!this->events_.empty()) {
+			events.push_back(this->events_.front());
+			this->events_.pop();
+		}
+	}
+
+	for (CURL* curlEasy : events) {
+		if (!curlEasy)
+			continue;
+
+		auto mit = this->curl2Task.find(curlEasy);
+		if (mit == this->curl2Task.end() || !mit->second)
+			continue;
+
+		auto it = mit->second.value();
+		TransferState::State state = it->state->state.load(std::memory_order_acquire);
+
+		switch (state) {
+			case TransferState::Cancel:
+				this->handle_cancel(*it);
+				this->curl2Task.erase(curlEasy);
+				this->transfers.erase(it);
+				break;
+			case TransferState::Pause:
+				this->handle_pause(*it);
+				break;
+			case TransferState::Resume:
+				this->handle_resume(*it);
+				break;
+			default:
+				break;
+		}
+	}
+}
+
+void HttpClient::handle_cancel(TransferTask& task) {
+	curl_multi_remove_handle(this->multi_, task.transfer.curlEasy);
+	this->sema_.release();
+	task.promise.set_exception(std::make_exception_ptr(std::runtime_error("The task is cancelled.")));
+}
+
+void HttpClient::handle_pause(TransferTask& task) {
+	curl_easy_pause(task.transfer.curlEasy, CURLPAUSE_ALL);
+	task.state->state.store(TransferState::Paused, std::memory_order_release);
+	this->sema_.release();
+}
+
+void HttpClient::handle_resume(TransferTask& task) {
+	// Acquire semaphore before resuming
+	if (!this->sema_.try_acquire()) {
+		// Re-queue the event for next epoch
+		std::lock_guard<std::mutex> lk(this->mutex_);
+		this->events_.emplace(task.transfer.curlEasy);
+		return;
+	}
+
+	curl_easy_pause(task.transfer.curlEasy, CURLPAUSE_CONT);
+	task.state->state.store(TransferState::Ongoing, std::memory_order_release);
 }
 
 HttpResponse HttpClient::request(HttpRequest request, RequestPolicy policy) {
