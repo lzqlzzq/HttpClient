@@ -36,20 +36,20 @@ HttpTransfer::HttpTransfer(const HttpRequest& request, const RequestPolicy& poli
 	CURL_EASY_DEFAULT_SETTING(this->curlEasy);
 
 	curl_easy_setopt(this->curlEasy, CURLOPT_URL, request.url.c_str());
-	if (policy.timeout_ms > 0)
-		curl_easy_setopt(this->curlEasy, CURLOPT_TIMEOUT_MS, policy.timeout_ms);
-	if (policy.conn_timeout_ms > 0)
-		curl_easy_setopt(this->curlEasy, CURLOPT_CONNECTTIMEOUT_MS, policy.conn_timeout_ms);
-	if (policy.send_speed_limit)
-		curl_easy_setopt(this->curlEasy, CURLOPT_MAX_SEND_SPEED_LARGE, policy.send_speed_limit);
-	if (policy.recv_speed_limit)
-		curl_easy_setopt(this->curlEasy, CURLOPT_MAX_RECV_SPEED_LARGE, policy.recv_speed_limit);
-	if (policy.low_speed_limit && policy.low_speed_time) {
-		curl_easy_setopt(this->curlEasy, CURLOPT_LOW_SPEED_LIMIT, policy.low_speed_limit);
-		curl_easy_setopt(this->curlEasy, CURLOPT_LOW_SPEED_TIME, policy.low_speed_time);
+	if (policy.timeout > 0)
+		curl_easy_setopt(this->curlEasy, CURLOPT_TIMEOUT_MS, static_cast<long>(policy.timeout * 1000));
+	if (policy.connTimeout > 0)
+		curl_easy_setopt(this->curlEasy, CURLOPT_CONNECTTIMEOUT_MS, static_cast<long>(policy.connTimeout * 1000));
+	if (policy.sendSpeedLimit)
+		curl_easy_setopt(this->curlEasy, CURLOPT_MAX_SEND_SPEED_LARGE, policy.sendSpeedLimit);
+	if (policy.recvSpeedLimit)
+		curl_easy_setopt(this->curlEasy, CURLOPT_MAX_RECV_SPEED_LARGE, policy.recvSpeedLimit);
+	if (policy.lowSpeedLimit && policy.lowSpeedTime) {
+		curl_easy_setopt(this->curlEasy, CURLOPT_LOW_SPEED_LIMIT, policy.lowSpeedLimit);
+		curl_easy_setopt(this->curlEasy, CURLOPT_LOW_SPEED_TIME, policy.lowSpeedTime);
 	}
-	if (policy.curl_buffer_size) {
-		unsigned long buf_size = std::clamp(policy.curl_buffer_size, 1024u, static_cast<unsigned int>(CURL_MAX_READ_SIZE));
+	if (policy.curlBufferSize) {
+		unsigned long buf_size = std::clamp(policy.curlBufferSize, 1024u, static_cast<unsigned int>(CURL_MAX_READ_SIZE));
 		curl_easy_setopt(this->curlEasy, CURLOPT_BUFFERSIZE, buf_size);
 	}
 
@@ -143,7 +143,7 @@ void HttpTransfer::finalize_transfer() {
 	this->response.transferInfo.total = total * us2s;
 	this->response.transferInfo.redir = redir * us2s;
 
-	this->response.transferInfo.completeAt = std::chrono::duration<double>(
+	this->response.transferInfo.completeAt = std::chrono::duration<float>(
 		std::chrono::system_clock::now().time_since_epoch()).count();
 }
 

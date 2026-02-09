@@ -101,15 +101,15 @@ private:
 };
 
 struct RequestPolicy {
-	uint32_t timeout_ms = 0;		// optional per-request timeout (<=0 means wait indefinitely)
-	uint32_t conn_timeout_ms = 0; // optional connection (DNS + handshake) timeout (<0 means default 300 second)
+	float timeout = 0;		// optional per-request timeout in seconds (<=0 means wait indefinitely)
+	float connTimeout = 0;	// optional connection (DNS + handshake) timeout in seconds (<0 means default 300 second)
 
-	uint32_t low_speed_limit = 0; // in byte
-	uint32_t low_speed_time = 0;  // in second
-	uint32_t send_speed_limit = 0; // bytes per second
-	uint32_t recv_speed_limit = 0; // bytes per second
+	uint32_t lowSpeedLimit = 0;	// in bytes
+	uint32_t lowSpeedTime = 0;	// in seconds
+	uint32_t sendSpeedLimit = 0;	// bytes per second
+	uint32_t recvSpeedLimit = 0;	// bytes per second
 
-	uint32_t curl_buffer_size = CURL_MAX_WRITE_SIZE; // in byte
+	uint32_t curlBufferSize = CURL_MAX_WRITE_SIZE; // in bytes
 };
 
 struct HttpRequest {
@@ -151,12 +151,11 @@ public:
 };
 
 struct TransferInfo {
-
 	// In second
-	double startAt = std::chrono::duration<double>(
+	float startAt = std::chrono::duration<float>(
 		std::chrono::system_clock::now().time_since_epoch()).count();
 	float queue = 0, connect = 0, appConnect = 0, preTransfer = 0, postTransfer = 0, ttfb = 0, startTransfer = 0, receiveTransfer = 0, total = 0, redir = 0;
-	double completeAt = 0;
+	float completeAt = 0;
 };
 
 struct HttpResponse {
