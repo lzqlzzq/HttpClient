@@ -426,6 +426,7 @@ void HttpClient::worker_loop() {
 
 void HttpClient::handle_events() {
 	std::vector<CURL*> events;
+	events.reserve(this->events_.size());
 	{
 		std::lock_guard<std::mutex> lk(this->mutex_);
 		while (!this->events_.empty()) {
