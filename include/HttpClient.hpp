@@ -155,6 +155,7 @@ struct TransferInfo {
 	uint64_t start_at = std::chrono::time_point_cast<std::chrono::microseconds>(
 		std::chrono::system_clock::now()).time_since_epoch().count();
 	uint64_t queue_s = 0, connect_s = 0, appconnect_s = 0, pretransfer_s = 0, posttransfer_s = 0, ttfb = 0, starttransfer_s = 0, receivetransfer_s = 0, total_s = 0, redir_s = 0;
+	uint64_t complete_at = 0;
 };
 
 struct HttpResponse {

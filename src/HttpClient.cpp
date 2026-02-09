@@ -137,6 +137,9 @@ void HttpTransfer::finalize_transfer() {
 	this->response.transferInfo.pretransfer_s -= this->response.transferInfo.appconnect_s;
 	this->response.transferInfo.appconnect_s -= this->response.transferInfo.connect_s;
 	this->response.transferInfo.connect_s -= this->response.transferInfo.queue_s;
+
+	this->response.transferInfo.complete_at = std::chrono::time_point_cast<std::chrono::microseconds>(
+		std::chrono::system_clock::now()).time_since_epoch().count();
 }
 
 void HttpTransfer::perform_blocking() {
