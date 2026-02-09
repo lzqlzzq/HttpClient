@@ -1,8 +1,10 @@
 #include "HttpClient.hpp"
+
 #include <atomic>
-#include <curl/curl.h>
-#include <curl/easy.h>
+#include <cstdlib>
+#include <regex>
 #include <thread>
+#include <random>
 
 namespace http_client {
 
@@ -82,9 +84,9 @@ HttpTransfer::HttpTransfer(const HttpRequest& request, const RequestPolicy& poli
 	}
 
 	curl_easy_setopt(this->curlEasy, CURLOPT_WRITEFUNCTION, HttpTransfer::body_cb);
-	curl_easy_setopt(this->curlEasy, CURLOPT_WRITEDATA, &response.body);
+	curl_easy_setopt(this->curlEasy, CURLOPT_WRITEDATA, this);
 	curl_easy_setopt(this->curlEasy, CURLOPT_HEADERFUNCTION, HttpTransfer::header_cb);
-	curl_easy_setopt(this->curlEasy, CURLOPT_HEADERDATA, &response.headers);
+	curl_easy_setopt(this->curlEasy, CURLOPT_HEADERDATA, this);
 };
 
 HttpTransfer::~HttpTransfer() {
@@ -142,12 +144,22 @@ void HttpTransfer::perform_blocking() {
 	this->finalize_transfer();
 }
 
-size_t HttpTransfer::body_cb(void* ptr, size_t size, size_t nmemb, std::string* data) {
-	data->append((char*)ptr, size * nmemb);
+size_t HttpTransfer::body_cb(void* ptr, size_t size, size_t nmemb, void* data) {
+	HttpTransfer* transfer = static_cast<HttpTransfer*>(data);
+	if(transfer->response.transferInfo.ttfb == 0)
+		transfer->response.transferInfo.ttfb = std::chrono::time_point_cast<std::chrono::microseconds>(
+			std::chrono::system_clock::now()).time_since_epoch().count() - \
+			transfer->response.transferInfo.start_at;
+	if(transfer->contentLength > transfer->response.body.capacity())
+		transfer->response.body.reserve(transfer->contentLength);
+
+	transfer->response.body.append((char*)ptr, size * nmemb);
 	return size * nmemb;
 }
 
-size_t HttpTransfer::header_cb(void* ptr, size_t size, size_t nmemb, std::vector<std::string>* data) {
+size_t HttpTransfer::header_cb(void* ptr, size_t size, size_t nmemb, void* data) {
+	HttpTransfer* transfer = static_cast<HttpTransfer*>(data);
+
 	const size_t len = size * nmemb;
 	if (!ptr || len == 0)
 		return len;
@@ -164,7 +176,14 @@ size_t HttpTransfer::header_cb(void* ptr, size_t size, size_t nmemb, std::vector
 	if (sv.rfind("HTTP/", 0) == 0)
 		return len;
 
-	data->emplace_back(sv);
+	transfer->response.headers.emplace_back(sv);
+
+	// Parse content-length for pre-allocation
+	static const std::regex contentLengthRegex("^content-length:\\s*(\\d+)", std::regex::icase);
+	std::match_results<std::string_view::const_iterator> match;
+	if (std::regex_search(sv.begin(), sv.end(), match, contentLengthRegex)) {
+		transfer->contentLength = std::atoi(match[1].str().c_str());
+	}
 
 	return len;
 }

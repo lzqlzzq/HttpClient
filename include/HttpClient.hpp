@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -12,7 +13,6 @@
 #include <memory>
 #include <mutex>
 #include <queue>
-#include <random>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -44,7 +44,7 @@ void CURL_MULTI_DEFAULT_SETTING(CURLM* handle);
 
 namespace util {
 
-	static std::string toupper(const std::string& str) {
+static std::string toupper(const std::string& str) {
 	std::string s(str);
 	for (char& c : s)
 		if (c >= 'a' && c <= 'z')
@@ -146,8 +146,11 @@ public:
 };
 
 struct TransferInfo {
+
 	// In microsecond
-	uint64_t queue_s, connect_s, appconnect_s, pretransfer_s, posttransfer_s, starttransfer_s, receivetransfer_s, total_s, redir_s;
+	uint64_t start_at = std::chrono::time_point_cast<std::chrono::microseconds>(
+		std::chrono::system_clock::now()).time_since_epoch().count();
+	uint64_t queue_s = 0, connect_s = 0, appconnect_s = 0, pretransfer_s = 0, posttransfer_s = 0, ttfb = 0, starttransfer_s = 0, receivetransfer_s = 0, total_s = 0, redir_s = 0;
 };
 
 struct HttpResponse {
@@ -181,11 +184,12 @@ private:
 
 	CURL* curlEasy = NULL;
 	struct curl_slist* headers_ = NULL;
+	size_t contentLength = -1;
 	HttpResponse response;
 	RequestPolicy policy;
 
-	static size_t body_cb(void* ptr, size_t size, size_t nmemb, std::string* data);
-	static size_t header_cb(void* ptr, size_t size, size_t nmemb, std::vector<std::string>* data);
+	static size_t body_cb(void* ptr, size_t size, size_t nmemb, void* data);
+	static size_t header_cb(void* ptr, size_t size, size_t nmemb, void* data);
 };
 
 class BoundedSemaphore {
