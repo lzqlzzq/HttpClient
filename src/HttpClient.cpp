@@ -6,7 +6,6 @@
 #include <cstdlib>
 #include <regex>
 #include <thread>
-#include <random>
 
 namespace http_client {
 
@@ -226,35 +225,6 @@ size_t HttpTransfer::header_cb(void* ptr, size_t size, size_t nmemb, void* data)
 	}
 
 	return len;
-}
-
-// BoundedSemaphore implementation
-BoundedSemaphore::BoundedSemaphore(size_t initial_count, size_t max_count)
-	: count_(initial_count), max_count_(max_count) {
-	assert(initial_count <= max_count && "initial_count must lower than max_count");
-}
-
-void BoundedSemaphore::acquire() {
-	std::unique_lock<std::mutex> lock(mutex_);
-	cv_.wait(lock, [&]() { return count_ > 0; });
-	--count_;
-}
-
-bool BoundedSemaphore::try_acquire() {
-	std::unique_lock<std::mutex> lock(mutex_);
-	if(count_ >= 1) {
-		--count_;
-		return true;
-	}
-	return false;
-}
-
-void BoundedSemaphore::release() {
-	std::unique_lock<std::mutex> lock(mutex_);
-	if (count_ < max_count_) {
-		++count_;
-	}
-	cv_.notify_one();
 }
 
 // HttpClient::TransferState implementation
@@ -532,7 +502,7 @@ std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest 
 	std::shared_ptr<TransferState> state = task.state;
 
 	this->sema_.acquire();
-	std::this_thread::sleep_for(std::chrono::duration<float, std::milli>(std::abs(jitter_generator(10))));
+	std::this_thread::sleep_for(std::chrono::duration<float, std::milli>(std::abs(util::jitter_generator(10))));
 
 	{
 		std::unique_lock lk(this->mutex_);
@@ -541,45 +511,6 @@ std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest 
 	curl_multi_wakeup(this->multi_);
 
 	return state;
-}
-
-float jitter_generator(float max) {
-    max = std::max(0.0f, max);
-    if (max == 0.0) return 0.0;
-
-    thread_local std::mt19937_64 rg{
-        [] {
-            std::random_device rd;
-            std::seed_seq seq{
-                rd(), rd(), rd(), rd(),
-                static_cast<unsigned>(
-                    std::hash<std::thread::id>{}(std::this_thread::get_id()))
-            };
-            return std::mt19937_64(seq);
-        }()
-    };
-
-    // ---- sigma scaling with max ----
-    const float ref       = 1e-3;  // 1ms
-    const float sigma_min = 0.3;
-    const float sigma_max = 1.5;
-
-    float sigma = std::clamp(
-        0.4f + 0.3f * std::log1p(max / ref),
-        sigma_min,
-        sigma_max
-    );
-
-    // median ≈ 5% of max
-    float mu = std::log(0.05 * max + 1e-12);
-
-    std::lognormal_distribution<float> mag_dist(mu, sigma);
-    std::bernoulli_distribution sign_dist(0.5);
-
-    float mag = mag_dist(rg);
-    if (mag > max) mag = max;
-
-    return sign_dist(rg) ? mag : -mag;
 }
 
 } // namespace http_client
