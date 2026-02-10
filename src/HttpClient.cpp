@@ -1,4 +1,6 @@
 #include "HttpClient.hpp"
+#include "curl/curl.h"
+#include "curl/easy.h"
 
 #include <atomic>
 #include <cstdlib>
@@ -30,63 +32,10 @@ void CURL_MULTI_DEFAULT_SETTING(CURLM* handle) {
 }
 
 // HttpTransfer implementation
-HttpTransfer::HttpTransfer(const HttpRequest& request, const RequestPolicy& policy) {
+HttpTransfer::HttpTransfer(HttpRequest request, RequestPolicy policy) :
+	request(std::move(request)), policy(std::move(policy)) {
 	this->curlEasy = curl_easy_init();
-
-	CURL_EASY_DEFAULT_SETTING(this->curlEasy);
-
-	curl_easy_setopt(this->curlEasy, CURLOPT_URL, request.url.c_str());
-	if (policy.timeout > 0)
-		curl_easy_setopt(this->curlEasy, CURLOPT_TIMEOUT_MS, static_cast<long>(policy.timeout * 1000));
-	if (policy.connTimeout > 0)
-		curl_easy_setopt(this->curlEasy, CURLOPT_CONNECTTIMEOUT_MS, static_cast<long>(policy.connTimeout * 1000));
-	if (policy.sendSpeedLimit)
-		curl_easy_setopt(this->curlEasy, CURLOPT_MAX_SEND_SPEED_LARGE, policy.sendSpeedLimit);
-	if (policy.recvSpeedLimit)
-		curl_easy_setopt(this->curlEasy, CURLOPT_MAX_RECV_SPEED_LARGE, policy.recvSpeedLimit);
-	if (policy.lowSpeedLimit && policy.lowSpeedTime) {
-		curl_easy_setopt(this->curlEasy, CURLOPT_LOW_SPEED_LIMIT, policy.lowSpeedLimit);
-		curl_easy_setopt(this->curlEasy, CURLOPT_LOW_SPEED_TIME, policy.lowSpeedTime);
-	}
-	if (policy.curlBufferSize) {
-		unsigned long buf_size = std::clamp(policy.curlBufferSize, 1024u, static_cast<unsigned int>(CURL_MAX_READ_SIZE));
-		curl_easy_setopt(this->curlEasy, CURLOPT_BUFFERSIZE, buf_size);
-	}
-
-	for (const auto header : request.headers) {
-		this->headers_ = curl_slist_append(this->headers_, header.c_str());
-	}
-	curl_easy_setopt(this->curlEasy, CURLOPT_HTTPHEADER, this->headers_);
-
-	switch (HttpRequest::method2Enum(request.methodName)) {
-		case HttpRequest::HEAD: {
-			curl_easy_setopt(this->curlEasy, CURLOPT_NOBODY, 1L);
-			break;
-		}
-		case HttpRequest::GET: {
-			curl_easy_setopt(this->curlEasy, CURLOPT_NOBODY, 1L);
-			curl_easy_setopt(this->curlEasy, CURLOPT_HTTPGET, 1L);
-			break;
-		}
-		case HttpRequest::POST: {
-			curl_easy_setopt(this->curlEasy, CURLOPT_POST, 1L);
-			curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDS, request.body.c_str());
-			curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDSIZE, request.body.size());
-			break;
-		}
-		default: {
-			curl_easy_setopt(this->curlEasy, CURLOPT_CUSTOMREQUEST, util::toupper(request.methodName).c_str());
-			if (request.body.size()) {
-				curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDS, request.body.c_str());
-				curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDSIZE, request.body.size());
-			}
-		}
-	}
-
-	curl_easy_setopt(this->curlEasy, CURLOPT_WRITEFUNCTION, HttpTransfer::body_cb);
-	curl_easy_setopt(this->curlEasy, CURLOPT_WRITEDATA, this);
-	curl_easy_setopt(this->curlEasy, CURLOPT_HEADERFUNCTION, HttpTransfer::header_cb);
-	curl_easy_setopt(this->curlEasy, CURLOPT_HEADERDATA, this);
+	this->reset();
 };
 
 HttpTransfer::~HttpTransfer() {
@@ -95,18 +44,37 @@ HttpTransfer::~HttpTransfer() {
 }
 
 HttpTransfer::HttpTransfer(HttpTransfer&& other) noexcept
-	: curlEasy(std::exchange(other.curlEasy, nullptr)), headers_(std::exchange(other.headers_, nullptr)),
-	  response(std::move(other.response)) {
+	: curlEasy(std::exchange(other.curlEasy, nullptr)),
+	  headers_(std::exchange(other.headers_, nullptr)),
+	  contentLength(other.contentLength),
+	  request(std::move(other.request)),
+	  response(std::move(other.response)),
+	  policy(std::move(other.policy)) {
 	if (curlEasy) {
-		curl_easy_setopt(curlEasy, CURLOPT_WRITEDATA, &response.body);
-		curl_easy_setopt(curlEasy, CURLOPT_HEADERDATA, &response.headers);
+		curl_easy_setopt(curlEasy, CURLOPT_WRITEDATA, this);
+		curl_easy_setopt(curlEasy, CURLOPT_HEADERDATA, this);
 	}
 }
 
 HttpTransfer& HttpTransfer::operator=(HttpTransfer&& other) noexcept {
 	if (this != &other) {
-		HttpTransfer tmp(std::move(other));
-		std::swap(*this, tmp);
+		// Clean up current resources
+		curl_easy_cleanup(this->curlEasy);
+		curl_slist_free_all(this->headers_);
+
+		// Move from other
+		this->curlEasy = std::exchange(other.curlEasy, nullptr);
+		this->headers_ = std::exchange(other.headers_, nullptr);
+		this->contentLength = other.contentLength;
+		this->request = std::move(other.request);
+		this->response = std::move(other.response);
+		this->policy = std::move(other.policy);
+
+		// Update callback data pointers to this
+		if (this->curlEasy) {
+			curl_easy_setopt(this->curlEasy, CURLOPT_WRITEDATA, this);
+			curl_easy_setopt(this->curlEasy, CURLOPT_HEADERDATA, this);
+		}
 	}
 	return *this;
 }
@@ -150,6 +118,70 @@ void HttpTransfer::finalize_transfer() {
 void HttpTransfer::perform_blocking() {
 	curl_easy_perform(this->curlEasy);
 	this->finalize_transfer();
+}
+
+void HttpTransfer::reset() {
+	if(!this->curlEasy)
+		this->curlEasy = curl_easy_init();
+	else
+		curl_easy_reset(this->curlEasy);
+
+	CURL_EASY_DEFAULT_SETTING(this->curlEasy);
+
+	curl_easy_setopt(this->curlEasy, CURLOPT_URL, this->request.url.c_str());
+	if (this->policy.timeout > 0)
+		curl_easy_setopt(this->curlEasy, CURLOPT_TIMEOUT_MS, static_cast<long>(this->policy.timeout * 1000));
+	if (this->policy.connTimeout > 0)
+		curl_easy_setopt(this->curlEasy, CURLOPT_CONNECTTIMEOUT_MS, static_cast<long>(this->policy.connTimeout * 1000));
+	if (this->policy.sendSpeedLimit)
+		curl_easy_setopt(this->curlEasy, CURLOPT_MAX_SEND_SPEED_LARGE, this->policy.sendSpeedLimit);
+	if (this->policy.recvSpeedLimit)
+		curl_easy_setopt(this->curlEasy, CURLOPT_MAX_RECV_SPEED_LARGE, this->policy.recvSpeedLimit);
+	if (this->policy.lowSpeedLimit && this->policy.lowSpeedTime) {
+		curl_easy_setopt(this->curlEasy, CURLOPT_LOW_SPEED_TIME, this->policy.lowSpeedTime);
+		curl_easy_setopt(this->curlEasy, CURLOPT_LOW_SPEED_LIMIT, this->policy.lowSpeedLimit);
+	}
+	if (this->policy.curlBufferSize) {
+		unsigned long buf_size = std::clamp(this->policy.curlBufferSize, 1024u, static_cast<unsigned int>(CURL_MAX_READ_SIZE));
+		curl_easy_setopt(this->curlEasy, CURLOPT_BUFFERSIZE, buf_size);
+	}
+
+	if(this->headers_)
+		curl_slist_free_all(this->headers_);
+	for (const auto header : this->request.headers) {
+		this->headers_ = curl_slist_append(this->headers_, header.c_str());
+	}
+	curl_easy_setopt(this->curlEasy, CURLOPT_HTTPHEADER, this->headers_);
+
+	switch (HttpRequest::method2Enum(this->request.methodName)) {
+		case HttpRequest::HEAD: {
+			curl_easy_setopt(this->curlEasy, CURLOPT_NOBODY, 1L);
+			break;
+		}
+		case HttpRequest::GET: {
+			curl_easy_setopt(this->curlEasy, CURLOPT_NOBODY, 1L);
+			curl_easy_setopt(this->curlEasy, CURLOPT_HTTPGET, 1L);
+			break;
+		}
+		case HttpRequest::POST: {
+			curl_easy_setopt(this->curlEasy, CURLOPT_POST, 1L);
+			curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDS, this->request.body.c_str());
+			curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDSIZE, this->request.body.size());
+			break;
+		}
+		default: {
+			curl_easy_setopt(this->curlEasy, CURLOPT_CUSTOMREQUEST, util::toupper(this->request.methodName).c_str());
+			if (this->request.body.size()) {
+				curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDS, this->request.body.c_str());
+				curl_easy_setopt(this->curlEasy, CURLOPT_POSTFIELDSIZE, this->request.body.size());
+			}
+		}
+	}
+
+	curl_easy_setopt(this->curlEasy, CURLOPT_WRITEFUNCTION, HttpTransfer::body_cb);
+	curl_easy_setopt(this->curlEasy, CURLOPT_WRITEDATA, this);
+	curl_easy_setopt(this->curlEasy, CURLOPT_HEADERFUNCTION, HttpTransfer::header_cb);
+	curl_easy_setopt(this->curlEasy, CURLOPT_HEADERDATA, this);
 }
 
 size_t HttpTransfer::body_cb(void* ptr, size_t size, size_t nmemb, void* data) {

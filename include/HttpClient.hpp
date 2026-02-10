@@ -170,7 +170,7 @@ struct HttpResponse {
 
 class HttpTransfer {
 public:
-	explicit HttpTransfer(const HttpRequest& request, const RequestPolicy& policy=RequestPolicy());
+	explicit HttpTransfer(HttpRequest request, RequestPolicy policy=RequestPolicy());
 	~HttpTransfer();
 
 	// Moveable, Not copyable
@@ -183,6 +183,7 @@ public:
 	HttpResponse detachResponse();
 	void finalize_transfer();
 	void perform_blocking();
+	void reset();
 
 private:
 	friend class HttpClient;
@@ -190,6 +191,7 @@ private:
 	CURL* curlEasy = NULL;
 	struct curl_slist* headers_ = NULL;
 	size_t contentLength = -1;
+	HttpRequest request;
 	HttpResponse response;
 	RequestPolicy policy;
 
