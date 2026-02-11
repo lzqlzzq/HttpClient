@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <set>
+#include <vector>
 
 namespace http_client {
 namespace retry {
@@ -47,15 +48,27 @@ inline RetryConditionFn httpStatusCondition(std::set<int> codes = {429, 500, 502
     };
 }
 
+// SAFINAE predictor for RetryConditionFn
+template <class Fn>
+using is_retry_pred = std::is_invocable_r<bool, Fn&, const RetryContext&>;
+
 /**
  * Combine multiple conditions with OR logic.
  * Returns true if any condition returns true.
  */
-inline RetryConditionFn anyOf(std::initializer_list<RetryConditionFn> conditions) {
-    std::vector<RetryConditionFn> conds(conditions);
-    return [conds = std::move(conds)](const RetryContext& ctx) -> bool {
-        return std::any_of(conds.begin(), conds.end(),
-            [&ctx](const auto& fn) { return fn && fn(ctx); });
+template <class... Fns,
+          std::enable_if_t<
+              (sizeof...(Fns) > 0) &&
+              (is_retry_pred<std::decay_t<Fns>>::value && ...) &&
+              (std::is_copy_constructible_v<std::decay_t<Fns>> && ...),
+              int> = 0>
+inline RetryConditionFn anyOf(Fns&&... fns) {
+    return [fs = std::tuple<std::decay_t<Fns>...>(std::forward<Fns>(fns)...)]
+           (const RetryContext& ctx) -> bool {
+        return std::apply(
+            [&](auto&... g) { return ((static_cast<bool>(g(ctx))) || ...); },
+            fs
+        );
     };
 }
 
@@ -63,11 +76,19 @@ inline RetryConditionFn anyOf(std::initializer_list<RetryConditionFn> conditions
  * Combine multiple conditions with AND logic.
  * Returns true if all conditions return true (or are empty).
  */
-inline RetryConditionFn allOf(std::initializer_list<RetryConditionFn> conditions) {
-    std::vector<RetryConditionFn> conds(conditions);
-    return [conds = std::move(conds)](const RetryContext& ctx) -> bool {
-        return std::all_of(conds.begin(), conds.end(),
-            [&ctx](const auto& fn) { return !fn || fn(ctx); });
+template <class... Fns,
+          std::enable_if_t<
+              (sizeof...(Fns) > 0) &&
+              (is_retry_pred<std::decay_t<Fns>>::value && ...) &&
+              (std::is_copy_constructible_v<std::decay_t<Fns>> && ...),
+              int> = 0>
+inline RetryConditionFn allOf(Fns&&... fns) {
+    return [fs = std::tuple<std::decay_t<Fns>...>(std::forward<Fns>(fns)...)]
+           (const RetryContext& ctx) -> bool {
+        return std::apply(
+            [&](auto&... g) { return ((static_cast<bool>(g(ctx))) && ...); },
+            fs
+        );
     };
 }
 
@@ -144,7 +165,7 @@ inline BackoffScheduleFn immediate() {
 inline RetryPolicy::RetryPolicy()
     : maxRetries(3)
     , totalTimeout(0)
-    , shouldRetry(retry::anyOf({retry::defaultCondition(), retry::httpStatusCondition()}))
+    , shouldRetry(retry::anyOf(retry::defaultCondition(), retry::httpStatusCondition()))
     , getNextRetryTime(retry::exponentialBackoff())
 {}
 
