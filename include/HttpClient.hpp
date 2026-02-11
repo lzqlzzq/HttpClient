@@ -2,6 +2,7 @@
 
 #include "models.hpp"
 #include "utils.hpp"
+#include "RetryPolicy.hpp"
 
 #include <atomic>
 #include <future>
@@ -59,14 +60,26 @@ public:
 		enum State { Pending, Ongoing, Completed, Pause, Paused, Resume, Failed, Cancel };
 		std::shared_future<HttpResponse> future;
 
+		// Basic accessors
 		void pause();
 		void resume();
 		void cancel();
 		State get_state();
 
+		// Retry-related accessors
+		bool hasRetry() const;
+		uint32_t getAttempt() const;
+		std::optional<std::reference_wrapper<RetryContext>> getRetryContext() const;
+
 	private:
-		std::atomic<State> state = State::Ongoing;
-		CURL* curl; // Only for look-up
+		struct RetryState {
+			RetryContext context;
+			RetryPolicy policy;
+		};
+
+		std::atomic<State> state{State::Ongoing};
+		CURL* curl;
+		std::unique_ptr<RetryState> retry_;
 
 		explicit TransferState(std::shared_future<HttpResponse>&& future, CURL* curl);
 
@@ -79,6 +92,9 @@ public:
 
 	HttpResponse request(HttpRequest request, RequestPolicy policy=RequestPolicy());
 	std::shared_ptr<TransferState> send_request(HttpRequest request, RequestPolicy policy=RequestPolicy());
+
+	HttpResponse request(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy);
+	std::shared_ptr<TransferState> send_request(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy);
 
 	float uplinkSpeed() const;
 	float downlinkSpeed() const;
@@ -97,7 +113,10 @@ private:
 		std::promise<HttpResponse> promise;
 		std::shared_ptr<TransferState> state;
 
+		double retryAt = 0;
+
 		explicit TransferTask(HttpRequest r, RequestPolicy p);
+		explicit TransferTask(HttpRequest r, RequestPolicy p, RetryPolicy retryPolicy);
 
 		friend class HttpClient;
 	};
@@ -108,6 +127,9 @@ private:
 	void handle_pause(TransferTask& task);
 	void handle_resume(TransferTask& task);
 
+	void handle_completion(std::list<TransferTask>::iterator it);
+	void handle_retry_completion(std::list<TransferTask>::iterator it, CURLcode curlCode);
+
 	using TaskIter = std::optional<std::list<TransferTask>::iterator>;
 
 	std::thread worker_;
@@ -116,6 +138,17 @@ private:
 	std::list<TransferTask> transfers;
 	std::map<CURL*, TaskIter> curl2Task;
 	std::queue<CURL*> events_;
+
+	struct RetryCompare {
+		bool operator()(const TransferTask& a,
+		                const TransferTask& b) const {
+			return a.retryAt > b.retryAt;  // Earlier time = higher priority
+		}
+	};
+
+	std::priority_queue<TransferTask,
+	                    std::vector<TransferTask>,
+	                    RetryCompare> pendingRetries_;
 
 	CURLM* multi_;
 

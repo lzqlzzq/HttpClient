@@ -1,4 +1,5 @@
 #include "HttpClient.hpp"
+#include "RetryStrategies.hpp"
 
 #include <cassert>
 #include <chrono>
@@ -210,6 +211,102 @@ void testPauseResume() {
 	}
 }
 
+void testRetry() {
+	std::cout << "\n========================================" << std::endl;
+	std::cout << "Retry Request Test..." << std::endl;
+	std::cout << "========================================" << std::endl;
+
+	auto& client = http_client::HttpClient::getInstance();
+
+	auto printTime = []() {
+		auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+		std::cout << "[" << std::put_time(std::localtime(&now), "%Y-%m-%d %H:%M:%S") << "] ";
+	};
+
+	// Create request to an endpoint that returns 500 error (will trigger retry)
+	http_client::HttpRequest request;
+	request.url = "https://httpbin.org/status/503";  // Returns 503 Service Unavailable
+	request.methodName = "GET";
+
+	// Configure retry policy
+	http_client::RetryPolicy retryPolicy;
+	retryPolicy.maxRetries = 3;
+	retryPolicy.totalTimeout = 30.0f;  // 30 seconds total timeout
+
+	// Retry on HTTP 5xx errors with exponential backoff
+	retryPolicy.shouldRetry = http_client::retry::httpStatusCondition({500, 502, 503, 504});
+	retryPolicy.getNextRetryTime = http_client::retry::exponentialBackoff(
+		1.0f,   // baseDelay: 1s
+		10.0f,  // maxDelay: 10s
+		2.0f,   // multiplier
+		0.2f    // jitterFactor
+	);
+
+	printTime();
+	std::cout << "Sending request with retry (expecting 503 response)..." << std::endl;
+	std::cout << "Max retries: " << retryPolicy.maxRetries << std::endl;
+
+	auto startTime = std::chrono::high_resolution_clock::now();
+
+	// Use async interface to monitor retry progress
+	auto transferState = client.send_request(request, http_client::RequestPolicy(), retryPolicy);
+
+	// Monitor retry attempts
+	while (transferState->get_state() != http_client::HttpClient::TransferState::Completed &&
+	       transferState->get_state() != http_client::HttpClient::TransferState::Failed) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+		if (transferState->hasRetry()) {
+			auto ctx = transferState->getRetryContext();
+			if (ctx) {
+				static uint32_t lastAttempt = 0;
+				uint32_t currentAttempt = ctx->get().attemptCount();
+				if (currentAttempt > lastAttempt) {
+					printTime();
+					std::cout << "Attempt " << currentAttempt << " completed";
+					if (!ctx->get().attempts.empty()) {
+						auto& last = ctx->get().attempts.back();
+						std::cout << " - Status: " << last.response.status
+						          << ", CURL code: " << last.curlCode;
+					}
+					std::cout << std::endl;
+					lastAttempt = currentAttempt;
+				}
+			}
+		}
+	}
+
+	auto endTime = std::chrono::high_resolution_clock::now();
+	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+
+	try {
+		auto response = transferState->future.get();
+		printTime();
+		std::cout << "Request completed after " << duration.count() / 1000.0 << "s" << std::endl;
+		std::cout << "Final status: " << response.status << std::endl;
+		std::cout << "Total attempts: " << transferState->getAttempt() << std::endl;
+	} catch (const std::exception& e) {
+		printTime();
+		std::cerr << "Request failed: " << e.what() << std::endl;
+	}
+
+	std::cout << "\n--- Testing successful request with retry policy ---" << std::endl;
+
+	// Test with a successful endpoint (should not retry)
+	http_client::HttpRequest successRequest;
+	successRequest.url = "https://httpbin.org/get";
+	successRequest.methodName = "GET";
+
+	printTime();
+	std::cout << "Sending request (expecting 200 response, no retry needed)..." << std::endl;
+
+	auto response = client.request(successRequest, http_client::RequestPolicy(), retryPolicy);
+
+	printTime();
+	std::cout << "Response status: " << response.status << std::endl;
+	std::cout << "Body length: " << response.body.length() << " bytes" << std::endl;
+}
+
 int main() {
 	std::cout << "========================================" << std::endl;
 	std::cout << "   HttpClient.hpp Example" << std::endl;
@@ -245,6 +342,11 @@ int main() {
 		std::cout << "\n[5] Pause and Resume Request" << std::endl;
 		std::cout << "----------------------------------------" << std::endl;
 		testPauseResume();
+
+		// Test 6: Test retry
+		std::cout << "\n[6] Retry Request" << std::endl;
+		std::cout << "----------------------------------------" << std::endl;
+		testRetry();
 
 		auto& client = http_client::HttpClient::getInstance();
 

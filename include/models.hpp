@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -79,8 +80,17 @@ struct TransferInfo {
 	// In second
 	float startAt = std::chrono::duration<float>(
 		std::chrono::system_clock::now().time_since_epoch()).count();
-	float queue = 0, connect = 0, appConnect = 0, preTransfer = 0, postTransfer = 0, ttfb = 0, startTransfer = 0, receiveTransfer = 0, total = 0, redir = 0;
-	float completeAt = 0;
+	float queue = std::numeric_limits<float>::infinity(),
+		connect = std::numeric_limits<float>::infinity(),
+		appConnect = std::numeric_limits<float>::infinity(),
+		preTransfer = std::numeric_limits<float>::infinity(),
+		postTransfer = std::numeric_limits<float>::infinity(),
+		ttfb = std::numeric_limits<float>::infinity(),
+		startTransfer = std::numeric_limits<float>::infinity(),
+		receiveTransfer = std::numeric_limits<float>::infinity(),
+		total = std::numeric_limits<float>::infinity(),
+		redir = std::numeric_limits<float>::infinity();
+	float completeAt = std::numeric_limits<float>::infinity();
 };
 
 struct HttpResponse {

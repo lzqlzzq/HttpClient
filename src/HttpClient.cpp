@@ -1,9 +1,11 @@
 #include "HttpClient.hpp"
+#include "RetryPolicy.hpp"
 #include "curl/curl.h"
 #include "curl/easy.h"
 
 #include <atomic>
 #include <cstdlib>
+#include <optional>
 #include <regex>
 #include <thread>
 
@@ -28,6 +30,11 @@ void CURL_MULTI_DEFAULT_SETTING(CURLM* handle) {
 	curl_multi_setopt(handle, CURLMOPT_MAX_TOTAL_CONNECTIONS, 4L);
 	curl_multi_setopt(handle, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
 	curl_multi_setopt(handle, CURLMOPT_MAXCONNECTS, 8L);
+}
+
+inline static double current_time() {
+	return std::chrono::duration<double>(
+		std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
 // HttpTransfer implementation
@@ -110,8 +117,7 @@ void HttpTransfer::finalize_transfer() {
 	this->response.transferInfo.total = total * us2s;
 	this->response.transferInfo.redir = redir * us2s;
 
-	this->response.transferInfo.completeAt = std::chrono::duration<float>(
-		std::chrono::system_clock::now().time_since_epoch()).count();
+	this->response.transferInfo.completeAt = current_time();
 }
 
 void HttpTransfer::perform_blocking() {
@@ -186,9 +192,7 @@ void HttpTransfer::reset() {
 size_t HttpTransfer::body_cb(void* ptr, size_t size, size_t nmemb, void* data) {
 	HttpTransfer* transfer = static_cast<HttpTransfer*>(data);
 	if(transfer->response.transferInfo.ttfb == 0)
-		transfer->response.transferInfo.ttfb = std::chrono::duration<double>(
-			std::chrono::system_clock::now().time_since_epoch()).count() - \
-			transfer->response.transferInfo.startAt;
+		transfer->response.transferInfo.ttfb = current_time() - transfer->response.transferInfo.startAt;
 	if(transfer->contentLength > transfer->response.body.capacity())
 		transfer->response.body.reserve(transfer->contentLength);
 
@@ -279,10 +283,32 @@ HttpClient::TransferState::State HttpClient::TransferState::get_state() {
 	return this->state.load(std::memory_order_acquire);
 }
 
+bool HttpClient::TransferState::hasRetry() const {
+	return retry_ != nullptr;
+}
+
+uint32_t HttpClient::TransferState::getAttempt() const {
+	return retry_ ? retry_->context.attemptCount() : 0;
+}
+
+std::optional<std::reference_wrapper<RetryContext>> HttpClient::TransferState::getRetryContext() const {
+	std::optional<std::reference_wrapper<RetryContext>> context;
+	if(this->retry_) context.emplace(this->retry_->context);
+	return context;
+}
+
 // HttpClient::TransferTask implementation
 HttpClient::TransferTask::TransferTask(HttpRequest r, RequestPolicy p)
-	: transfer(r, p), state(std::shared_ptr<TransferState>(
-					   new TransferState{this->promise.get_future().share(), this->transfer.curlEasy})) {};
+	: transfer(r, p), policy(p), state(std::shared_ptr<TransferState>(
+					   new TransferState(this->promise.get_future().share(), this->transfer.curlEasy))) {};
+
+HttpClient::TransferTask::TransferTask(HttpRequest r, RequestPolicy p, RetryPolicy retryPolicy)
+	: transfer(r, p), policy(p), state(std::shared_ptr<TransferState>(
+					   new TransferState(this->promise.get_future().share(), this->transfer.curlEasy))) {
+	state->retry_ = std::make_unique<TransferState::RetryState>();
+	state->retry_->policy = std::move(retryPolicy);
+	state->retry_->context.first_attempt_at = current_time();
+};
 
 // HttpClient implementation
 HttpClient& HttpClient::getInstance() {
@@ -331,6 +357,50 @@ float HttpClient::peakDownlinkSpeed() const {
 	return this->downlinkAvgSpeed.max();
 }
 
+HttpResponse HttpClient::request(HttpRequest request, RequestPolicy policy) {
+	std::shared_ptr<TransferState> state = this->send_request(std::move(request), std::move(policy));
+
+	return state->future.get();
+}
+
+std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest request, RequestPolicy policy) {
+	TransferTask task(std::move(request), std::move(policy));
+	std::shared_ptr<TransferState> state = task.state;
+
+	this->sema_.acquire();
+	std::this_thread::sleep_for(std::chrono::duration<float, std::milli>(std::abs(util::jitter_generator(10))));
+
+	{
+		std::unique_lock lk(this->mutex_);
+		this->requests.emplace(std::move(task));
+	}
+	curl_multi_wakeup(this->multi_);
+
+	return state;
+}
+
+HttpResponse HttpClient::request(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy) {
+	std::shared_ptr<TransferState> state = this->send_request(std::move(request), std::move(policy), std::move(retryPolicy));
+
+	return state->future.get();
+}
+
+std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy) {
+	TransferTask task(std::move(request), std::move(policy), std::move(retryPolicy));
+	std::shared_ptr<TransferState> state = task.state;
+
+	this->sema_.acquire();
+	std::this_thread::sleep_for(std::chrono::duration<float, std::milli>(std::abs(util::jitter_generator(10))));
+
+	{
+		std::unique_lock lk(this->mutex_);
+		this->requests.emplace(std::move(task));
+	}
+	curl_multi_wakeup(this->multi_);
+
+	return state;
+}
+
 void HttpClient::worker_loop() {
 	while (1) {
 		int still_running = 0;
@@ -352,6 +422,7 @@ void HttpClient::worker_loop() {
 				auto mit = this->curl2Task.find(easy);
 				if (mit != this->curl2Task.end() && mit->second) {
 					auto it = mit->second.value();
+					CURLcode curlCode = msg->data.result;
 
 					it->transfer.finalize_transfer();
 
@@ -363,13 +434,14 @@ void HttpClient::worker_loop() {
 					this->downlinkAvgSpeed.push(dlSpeed);
 					this->uplinkAvgSpeed.push(upSpeed);
 
-					// Put response into promise
-					it->promise.set_value(std::move(it->transfer.detachResponse()));
-
-					// Tag it completed
-					it->state->state.store(TransferState::State::Completed, std::memory_order_release);
-					this->curl2Task.erase(easy);
-					this->transfers.erase(it);
+					if (it->state->retry_) {
+						this->handle_retry_completion(it, curlCode);
+					} else {
+						// Non-retry request: set promise value and cleanup
+						it->promise.set_value(std::move(it->transfer.detachResponse()));
+						it->state->state.store(TransferState::State::Completed, std::memory_order_release);
+						this->handle_completion(it);
+					}
 				}
 			}
 		} while (msg);
@@ -384,6 +456,28 @@ void HttpClient::worker_loop() {
 			poll_timeout = 0;
 		else
 			poll_timeout = (int)std::min<long>(t, POLL_MS);
+
+		// Handle retry - only process retries whose time has come
+		while(!this->pendingRetries_.empty()) {
+			double now = current_time();
+			double deltaTime = this->pendingRetries_.top().retryAt - now;
+
+			if(deltaTime <= 0 && sema_.try_acquire()) {
+				auto&& top = const_cast<TransferTask&>(this->pendingRetries_.top());
+				TransferTask task = std::move(top);
+				this->pendingRetries_.pop();
+
+				task.transfer.reset();
+
+				std::unique_lock lk(this->mutex_);
+				this->requests.emplace(std::move(task));
+			} else {
+				// Adjust poll_timeout to wake up when next retry is due
+				int retryWaitMs = static_cast<int>(std::max(0.0, deltaTime) * 1000);
+				poll_timeout = std::min(poll_timeout, retryWaitMs);
+				break;
+			}
+		}
 
 		curl_multi_poll(multi_, nullptr, 0, poll_timeout, NULL);
 
@@ -491,26 +585,35 @@ void HttpClient::handle_resume(TransferTask& task) {
 	task.state->state.store(TransferState::Ongoing, std::memory_order_release);
 }
 
-HttpResponse HttpClient::request(HttpRequest request, RequestPolicy policy) {
-	std::shared_ptr<TransferState> state = this->send_request(std::move(request), std::move(policy));
+void HttpClient::handle_retry_completion(std::list<TransferTask>::iterator it, CURLcode curlCode) {
+	auto& context = it->state->retry_->context;
+	auto& policy = it->state->retry_->policy;
 
-	return state->future.get();
+	double now = current_time();
+	context.attempts.emplace_back(AttemptRecord{
+		it->transfer.getResponse(),
+		curlCode, now});
+
+	if (policy.shouldRetry && policy.shouldRetry(context) &&
+		context.attemptCount() < policy.maxRetries &&
+		((policy.totalTimeout <= 0) ||
+	    (now - context.first_attempt_at < policy.totalTimeout))) {
+		it->retryAt = policy.getNextRetryTime(context);
+
+		this->curl2Task.erase(it->transfer.curlEasy);
+		this->pendingRetries_.emplace(std::move(*it));
+		this->transfers.erase(it);
+	} else {
+		// No need for retry - complete the request
+		it->promise.set_value(std::move(it->transfer.detachResponse()));
+		it->state->state.store(TransferState::State::Completed, std::memory_order_release);
+		this->handle_completion(it);
+	}
 }
 
-std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest request, RequestPolicy policy) {
-	TransferTask task(std::move(request), std::move(policy));
-	std::shared_ptr<TransferState> state = task.state;
-
-	this->sema_.acquire();
-	std::this_thread::sleep_for(std::chrono::duration<float, std::milli>(std::abs(util::jitter_generator(10))));
-
-	{
-		std::unique_lock lk(this->mutex_);
-		this->requests.emplace(std::move(task));
-	}
-	curl_multi_wakeup(this->multi_);
-
-	return state;
+void HttpClient::handle_completion(std::list<TransferTask>::iterator it) {
+	this->curl2Task.erase(it->transfer.curlEasy);
+	this->transfers.erase(it);
 }
 
 } // namespace http_client
