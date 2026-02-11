@@ -48,13 +48,13 @@ inline static double current_time() {
 HttpTransfer::HttpTransfer(HttpRequest request, RequestPolicy policy, const HttpClientSettings& settings) :
 	request(std::move(request)), policy(std::move(policy)), settings_(settings) {
 
-	// static std::atomic<size_t> refCount_ = 0;
 	static std::once_flag inited;
 
 	std::call_once(inited, []() {
         auto rc = curl_global_init(CURL_GLOBAL_DEFAULT);
         if (rc != CURLE_OK) throw std::runtime_error("curl_global_init failed");
-        std::atexit([]{ curl_global_cleanup(); });
+		// If in SDK, just let OS to cleanup
+        // std::atexit([]{ curl_global_cleanup(); });
 	});
 
 	this->curlEasy = curl_easy_init();
