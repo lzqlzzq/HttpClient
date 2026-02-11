@@ -159,6 +159,47 @@ inline BackoffScheduleFn immediate() {
     };
 }
 
+template <class Fn>
+using is_backoff_schedule_fn = std::is_invocable_r<double, Fn&, const RetryContext&>;
+
+template <class... Fns,
+          std::enable_if_t<
+              (sizeof...(Fns) > 0) &&
+              (is_backoff_schedule_fn<std::decay_t<Fns>>::value && ...) &&
+              (std::is_copy_constructible_v<std::decay_t<Fns>> && ...),
+              int> = 0>
+inline BackoffScheduleFn maxOf(Fns&&... fns) {
+    auto sched = [fs = std::tuple<std::decay_t<Fns>...>(std::forward<Fns>(fns)...)]
+                 (const RetryContext& ctx) mutable -> double {
+        return std::apply([&](auto& first, auto&... rest) -> double {
+            double m = static_cast<double>(first(ctx));
+            ((m = std::max(m, static_cast<double>(rest(ctx)))), ...);
+            return m;
+        }, fs);
+    };
+
+    return BackoffScheduleFn{std::move(sched)};
+}
+
+template <class... Fns,
+          std::enable_if_t<
+              (sizeof...(Fns) > 0) &&
+              (is_backoff_schedule_fn<std::decay_t<Fns>>::value && ...) &&
+              (std::is_copy_constructible_v<std::decay_t<Fns>> && ...),
+              int> = 0>
+inline BackoffScheduleFn minOf(Fns&&... fns) {
+    auto sched = [fs = std::tuple<std::decay_t<Fns>...>(std::forward<Fns>(fns)...)]
+                 (const RetryContext& ctx) mutable -> double {
+        return std::apply([&](auto& first, auto&... rest) -> double {
+            double m = static_cast<double>(first(ctx));
+            ((m = std::min(m, static_cast<double>(rest(ctx)))), ...);
+            return m;
+        }, fs);
+    };
+
+    return BackoffScheduleFn{std::move(sched)};
+}
+
 } // namespace retry
 
 // Default constructor implementation for RetryPolicy
