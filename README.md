@@ -109,22 +109,20 @@ http_client::HttpTransfer transfer(request);
 transfer.perform_blocking();
 ```
 
-### Async Request (HttpClient Singleton)
+### Async Request (HttpClient)
 
-The `HttpClient` singleton manages its own curl initialization and connection pool:
+The `HttpClient` manages its own curl initialization and connection pool:
 
 ```cpp
 #include "HttpClient.hpp"
 
 int main() {
-    auto& client = http_client::HttpClient::getInstance();
-
+    // Use static convenience methods (uses default client internally)
     http_client::HttpRequest request;
     request.url = "https://httpbin.org/get";
     request.methodName = "GET";
 
-    // Synchronous request via pool (blocks until complete)
-    auto response = client.request(request);
+    auto response = http_client::HttpClient::Request(request);
 
     std::cout << "Status: " << response.status << std::endl;
     std::cout << "Elapsed: " << response.transferInfo.total << "s" << std::endl;
@@ -133,16 +131,21 @@ int main() {
 }
 ```
 
+Or use the default client instance directly:
+
+```cpp
+auto& client = http_client::HttpClient::getDefault();
+auto response = client.request(request);
+```
+
 ### Async with Cancellation
 
 ```cpp
-auto& client = http_client::HttpClient::getInstance();
-
 http_client::HttpRequest request;
 request.url = "https://httpbin.org/delay/10";
 request.methodName = "GET";
 
-auto state = client.send_request(request);
+auto state = http_client::HttpClient::SendRequest(request);
 
 // Option 1: Wait for result
 state->future.wait();
@@ -155,7 +158,7 @@ state->cancel();
 ### Pause and Resume
 
 ```cpp
-auto state = client.send_request(request);
+auto state = http_client::HttpClient::SendRequest(request);
 
 // Pause transfer
 state->pause();
@@ -172,8 +175,6 @@ auto response = state->future.get();
 ```cpp
 #include "HttpClient.hpp"
 #include "RetryStrategies.hpp"
-
-auto& client = http_client::HttpClient::getInstance();
 
 http_client::HttpRequest request;
 request.url = "https://httpbin.org/status/503";
@@ -195,7 +196,7 @@ retryPolicy.getNextRetryTime = http_client::retry::exponentialBackoff(
     0.2    // jitterFactor
 );
 
-auto response = client.request(request, http_client::RequestPolicy(), retryPolicy);
+auto response = http_client::HttpClient::Request(request, http_client::RequestPolicy(), retryPolicy);
 ```
 
 ### Combining Retry Conditions
@@ -298,11 +299,13 @@ Supported algorithms: `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `sh
 
 | Method | Description |
 |--------|-------------|
-| `getInstance()` | Get singleton instance |
-| `request(request, policy)` | Synchronous request |
-| `request(request, policy, retryPolicy)` | Synchronous request with retry |
-| `send_request(request, policy)` | Async request, returns `shared_ptr<TransferState>` |
-| `send_request(request, policy, retryPolicy)` | Async request with retry |
+| `getDefault()` | Get default singleton instance |
+| `Request(request, policy)` | Static: synchronous request using default client |
+| `Request(request, policy, retryPolicy)` | Static: synchronous request with retry |
+| `SendRequest(request, policy)` | Static: async request, returns `shared_ptr<TransferState>` |
+| `SendRequest(request, policy, retryPolicy)` | Static: async request with retry |
+| `request(request, policy)` | Instance: synchronous request |
+| `send_request(request, policy)` | Instance: async request |
 | `stop()` | Stop client and cancel all pending requests |
 | `uplinkSpeed()` / `downlinkSpeed()` | Average transfer speed in bytes/sec |
 | `peakUplinkSpeed()` / `peakDownlinkSpeed()` | Peak transfer speed |

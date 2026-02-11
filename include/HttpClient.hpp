@@ -19,12 +19,47 @@ namespace http_client {
 #define POLL_MS 100L
 #define SPEED_TRACK_WINDOW 128L
 
-void CURL_EASY_DEFAULT_SETTING(CURL* handle);
-void CURL_MULTI_DEFAULT_SETTING(CURLM* handle);
+/**
+ * Configuration class for HttpClient.
+ * Provides virtual methods for customizing CURL handle settings.
+ * Inherit from this class to customize behavior.
+ */
+class HttpClientSettings {
+public:
+	virtual ~HttpClientSettings() = default;
+
+	/**
+	 * Get the default settings instance.
+	 */
+	static const HttpClientSettings& getDefault();
+
+	// Connection pool settings
+	long maxConnections = MAX_CONNECTION;
+	long pollTimeoutMs = POLL_MS;
+	size_t speedTrackWindow = SPEED_TRACK_WINDOW;
+
+	// CURL multi settings
+	long maxHostConnections = 2L;
+	long maxTotalConnections = 4L;
+
+	/**
+	 * Apply default settings to a CURL easy handle.
+	 * Override to customize per-request CURL options.
+	 */
+	virtual void applyCurlEasySettings(CURL* handle) const;
+
+	/**
+	 * Apply default settings to a CURL multi handle.
+	 * Override to customize connection pool behavior.
+	 */
+	virtual void applyCurlMultiSettings(CURLM* handle) const;
+};
+
 
 class HttpTransfer {
 public:
-	explicit HttpTransfer(HttpRequest request, RequestPolicy policy=RequestPolicy());
+	explicit HttpTransfer(HttpRequest request, RequestPolicy policy=RequestPolicy(),
+	                      const HttpClientSettings& settings = HttpClientSettings::getDefault());
 	~HttpTransfer();
 
 	// Moveable, Not copyable
@@ -48,6 +83,7 @@ private:
 	HttpRequest request;
 	HttpResponse response;
 	RequestPolicy policy;
+	const HttpClientSettings& settings_;
 
 	static size_t body_cb(void* ptr, size_t size, size_t nmemb, void* data);
 	static size_t header_cb(void* ptr, size_t size, size_t nmemb, void* data);
@@ -79,22 +115,60 @@ public:
 
 		std::atomic<State> state{State::Ongoing};
 		CURL* curl;
+		HttpClient* client_;
 		std::unique_ptr<RetryState> retry_;
 
-		explicit TransferState(std::shared_future<HttpResponse>&& future, CURL* curl);
+		explicit TransferState(std::shared_future<HttpResponse>&& future, CURL* curl, HttpClient* client);
 
 		friend class HttpClient;
 	};
 
-	static HttpClient& getInstance();
+	/**
+	 * Get the default singleton instance with default settings.
+	 */
+	static HttpClient& getDefault();
+
+	/**
+	 * Create a new HttpClient instance with custom settings.
+	 * The settings object must outlive the HttpClient instance.
+	 */
+	explicit HttpClient(const HttpClientSettings& settings);
+
+	/**
+	 * Create a new HttpClient instance with default settings.
+	 */
+	HttpClient();
+
+	~HttpClient();
+
+	// Non-copyable, non-moveable
+	HttpClient(const HttpClient&) = delete;
+	HttpClient& operator=(const HttpClient&) = delete;
+	HttpClient(HttpClient&&) = delete;
+	HttpClient& operator=(HttpClient&&) = delete;
 
 	void stop();
 
+	// Instance methods
 	HttpResponse request(HttpRequest request, RequestPolicy policy=RequestPolicy());
 	std::shared_ptr<TransferState> send_request(HttpRequest request, RequestPolicy policy=RequestPolicy());
 
 	HttpResponse request(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy);
 	std::shared_ptr<TransferState> send_request(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy);
+
+	// Static convenience methods using default client
+	static HttpResponse Request(HttpRequest request, RequestPolicy policy=RequestPolicy()) {
+		return getDefault().request(std::move(request), std::move(policy));
+	}
+	static std::shared_ptr<TransferState> SendRequest(HttpRequest request, RequestPolicy policy=RequestPolicy()) {
+		return getDefault().send_request(std::move(request), std::move(policy));
+	}
+	static HttpResponse Request(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy) {
+		return getDefault().request(std::move(request), std::move(policy), std::move(retryPolicy));
+	}
+	static std::shared_ptr<TransferState> SendRequest(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy) {
+		return getDefault().send_request(std::move(request), std::move(policy), std::move(retryPolicy));
+	}
 
 	float uplinkSpeed() const;
 	float downlinkSpeed() const;
@@ -102,9 +176,10 @@ public:
 	float peakUplinkSpeed() const;
 	float peakDownlinkSpeed() const;
 
+	const HttpClientSettings& settings() const { return settings_; }
+
 private:
-	HttpClient();
-	~HttpClient();
+	void init();
 
 	class TransferTask {
 	private:
@@ -115,8 +190,8 @@ private:
 
 		double retryAt = 0;
 
-		explicit TransferTask(HttpRequest r, RequestPolicy p);
-		explicit TransferTask(HttpRequest r, RequestPolicy p, RetryPolicy retryPolicy);
+		explicit TransferTask(HttpRequest r, RequestPolicy p, HttpClient* client);
+		explicit TransferTask(HttpRequest r, RequestPolicy p, RetryPolicy retryPolicy, HttpClient* client);
 
 		friend class HttpClient;
 	};
@@ -132,6 +207,7 @@ private:
 
 	using TaskIter = std::optional<std::list<TransferTask>::iterator>;
 
+	const HttpClientSettings& settings_;
 	std::thread worker_;
 
 	std::queue<TransferTask> requests;

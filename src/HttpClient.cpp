@@ -5,31 +5,38 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <thread>
 
 namespace http_client {
 
-void CURL_EASY_DEFAULT_SETTING(CURL* handle) {
+// HttpClientSettings implementation
+const HttpClientSettings& HttpClientSettings::getDefault() {
+	static HttpClientSettings defaultSettings;
+	return defaultSettings;
+}
+
+void HttpClientSettings::applyCurlEasySettings(CURL* handle) const {
 	curl_easy_setopt(handle, CURLOPT_CA_CACHE_TIMEOUT, 604800L);
 	curl_easy_setopt(handle, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_NONE);
 	curl_easy_setopt(handle, CURLOPT_FORBID_REUSE, 0L);
 	curl_easy_setopt(handle, CURLOPT_NOPROGRESS, 1L);
 	curl_easy_setopt(handle, CURLOPT_TCP_KEEPALIVE, 1L);
 	curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);
-	curl_easy_setopt(handle, CURLOPT_MAXCONNECTS, 8L);
+	curl_easy_setopt(handle, CURLOPT_MAXCONNECTS, this->maxConnections);
 	curl_easy_setopt(handle, CURLOPT_USE_SSL, CURLUSESSL_TRY);
 }
 
-void CURL_MULTI_DEFAULT_SETTING(CURLM* handle) {
+void HttpClientSettings::applyCurlMultiSettings(CURLM* handle) const {
 #if LIBCURL_VERSION_NUM >= 0x080c00
 	curl_multi_setopt(handle, CURLMOPT_NETWORK_CHANGED, CURLMNWC_CLEAR_CONNS | CURLMNWC_CLEAR_DNS);
 #endif
-	curl_multi_setopt(handle, CURLMOPT_MAX_HOST_CONNECTIONS, 2L);
-	curl_multi_setopt(handle, CURLMOPT_MAX_TOTAL_CONNECTIONS, 4L);
+	curl_multi_setopt(handle, CURLMOPT_MAX_HOST_CONNECTIONS, this->maxHostConnections);
+	curl_multi_setopt(handle, CURLMOPT_MAX_TOTAL_CONNECTIONS, this->maxTotalConnections);
 	curl_multi_setopt(handle, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
-	curl_multi_setopt(handle, CURLMOPT_MAXCONNECTS, 8L);
+	curl_multi_setopt(handle, CURLMOPT_MAXCONNECTS, this->maxConnections);
 }
 
 inline static double current_time() {
@@ -38,8 +45,18 @@ inline static double current_time() {
 }
 
 // HttpTransfer implementation
-HttpTransfer::HttpTransfer(HttpRequest request, RequestPolicy policy) :
-	request(std::move(request)), policy(std::move(policy)) {
+HttpTransfer::HttpTransfer(HttpRequest request, RequestPolicy policy, const HttpClientSettings& settings) :
+	request(std::move(request)), policy(std::move(policy)), settings_(settings) {
+
+	// static std::atomic<size_t> refCount_ = 0;
+	static std::once_flag inited;
+
+	std::call_once(inited, []() {
+        auto rc = curl_global_init(CURL_GLOBAL_DEFAULT);
+        if (rc != CURLE_OK) throw std::runtime_error("curl_global_init failed");
+        std::atexit([]{ curl_global_cleanup(); });
+	});
+
 	this->curlEasy = curl_easy_init();
 	this->reset();
 };
@@ -55,7 +72,8 @@ HttpTransfer::HttpTransfer(HttpTransfer&& other) noexcept
 	  contentLength(other.contentLength),
 	  request(std::move(other.request)),
 	  response(std::move(other.response)),
-	  policy(std::move(other.policy)) {
+	  policy(std::move(other.policy)),
+	  settings_(other.settings_) {
 	if (curlEasy) {
 		curl_easy_setopt(curlEasy, CURLOPT_WRITEDATA, this);
 		curl_easy_setopt(curlEasy, CURLOPT_HEADERDATA, this);
@@ -75,6 +93,7 @@ HttpTransfer& HttpTransfer::operator=(HttpTransfer&& other) noexcept {
 		this->request = std::move(other.request);
 		this->response = std::move(other.response);
 		this->policy = std::move(other.policy);
+		// Note: settings_ is a reference, cannot be reassigned
 
 		// Update callback data pointers to this
 		if (this->curlEasy) {
@@ -131,7 +150,7 @@ void HttpTransfer::reset() {
 	else
 		curl_easy_reset(this->curlEasy);
 
-	CURL_EASY_DEFAULT_SETTING(this->curlEasy);
+	this->settings_.applyCurlEasySettings(this->curlEasy);
 
 	curl_easy_setopt(this->curlEasy, CURLOPT_URL, this->request.url.c_str());
 	if (this->policy.timeout > 0)
@@ -232,19 +251,17 @@ size_t HttpTransfer::header_cb(void* ptr, size_t size, size_t nmemb, void* data)
 }
 
 // HttpClient::TransferState implementation
-HttpClient::TransferState::TransferState(std::shared_future<HttpResponse>&& future, CURL* curl)
-	: future(future), curl(curl) {}
+HttpClient::TransferState::TransferState(std::shared_future<HttpResponse>&& future, CURL* curl, HttpClient* client)
+	: future(future), curl(curl), client_(client) {}
 
 void HttpClient::TransferState::cancel() {
 	state.store(State::Cancel, std::memory_order_release);
 
-	HttpClient& httpClient = HttpClient::getInstance();
-
 	{
-		std::unique_lock<std::mutex> lk(httpClient.mutex_);
-		httpClient.events_.emplace(this->curl);
+		std::unique_lock<std::mutex> lk(client_->mutex_);
+		client_->events_.emplace(this->curl);
 	}
-	curl_multi_wakeup(httpClient.multi_);
+	curl_multi_wakeup(client_->multi_);
 }
 
 void HttpClient::TransferState::pause() {
@@ -254,13 +271,11 @@ void HttpClient::TransferState::pause() {
 		return;
 	}
 
-	HttpClient& httpClient = HttpClient::getInstance();
-
 	{
-		std::unique_lock<std::mutex> lk(httpClient.mutex_);
-		httpClient.events_.emplace(this->curl);
+		std::unique_lock<std::mutex> lk(client_->mutex_);
+		client_->events_.emplace(this->curl);
 	}
-	curl_multi_wakeup(httpClient.multi_);
+	curl_multi_wakeup(client_->multi_);
 }
 
 void HttpClient::TransferState::resume() {
@@ -270,13 +285,11 @@ void HttpClient::TransferState::resume() {
 		return;
 	}
 
-	HttpClient& httpClient = HttpClient::getInstance();
-
 	{
-		std::unique_lock<std::mutex> lk(httpClient.mutex_);
-		httpClient.events_.emplace(this->curl);
+		std::unique_lock<std::mutex> lk(client_->mutex_);
+		client_->events_.emplace(this->curl);
 	}
-	curl_multi_wakeup(httpClient.multi_);
+	curl_multi_wakeup(client_->multi_);
 }
 
 HttpClient::TransferState::State HttpClient::TransferState::get_state() {
@@ -298,20 +311,20 @@ std::optional<std::reference_wrapper<RetryContext>> HttpClient::TransferState::g
 }
 
 // HttpClient::TransferTask implementation
-HttpClient::TransferTask::TransferTask(HttpRequest r, RequestPolicy p)
-	: transfer(r, p), policy(p), state(std::shared_ptr<TransferState>(
-					   new TransferState(this->promise.get_future().share(), this->transfer.curlEasy))) {};
+HttpClient::TransferTask::TransferTask(HttpRequest r, RequestPolicy p, HttpClient* client)
+	: transfer(r, p, client->settings_), policy(p), state(std::shared_ptr<TransferState>(
+					   new TransferState(this->promise.get_future().share(), this->transfer.curlEasy, client))) {};
 
-HttpClient::TransferTask::TransferTask(HttpRequest r, RequestPolicy p, RetryPolicy retryPolicy)
-	: transfer(r, p), policy(p), state(std::shared_ptr<TransferState>(
-					   new TransferState(this->promise.get_future().share(), this->transfer.curlEasy))) {
+HttpClient::TransferTask::TransferTask(HttpRequest r, RequestPolicy p, RetryPolicy retryPolicy, HttpClient* client)
+	: transfer(r, p, client->settings_), policy(p), state(std::shared_ptr<TransferState>(
+					   new TransferState(this->promise.get_future().share(), this->transfer.curlEasy, client))) {
 	state->retry_ = std::make_unique<TransferState::RetryState>();
 	state->retry_->policy = std::move(retryPolicy);
 	state->retry_->context.first_attempt_at = current_time();
 };
 
 // HttpClient implementation
-HttpClient& HttpClient::getInstance() {
+HttpClient& HttpClient::getDefault() {
 	static HttpClient instance;
 	return instance;
 }
@@ -323,13 +336,26 @@ void HttpClient::stop() {
 	}
 }
 
-HttpClient::HttpClient()
-	: sema_(MAX_CONNECTION, MAX_CONNECTION), uplinkAvgSpeed(SPEED_TRACK_WINDOW), downlinkAvgSpeed(SPEED_TRACK_WINDOW) {
-	curl_global_init(CURL_GLOBAL_DEFAULT);
-
+void HttpClient::init() {
 	this->multi_ = curl_multi_init();
-	CURL_MULTI_DEFAULT_SETTING(this->multi_);
+	this->settings_.applyCurlMultiSettings(this->multi_);
 	this->worker_ = std::thread(&HttpClient::worker_loop, this);
+}
+
+HttpClient::HttpClient()
+	: settings_(HttpClientSettings::getDefault()),
+	  sema_(settings_.maxConnections, settings_.maxConnections),
+	  uplinkAvgSpeed(settings_.speedTrackWindow),
+	  downlinkAvgSpeed(settings_.speedTrackWindow) {
+	init();
+}
+
+HttpClient::HttpClient(const HttpClientSettings& settings)
+	: settings_(settings),
+	  sema_(settings_.maxConnections, settings_.maxConnections),
+	  uplinkAvgSpeed(settings_.speedTrackWindow),
+	  downlinkAvgSpeed(settings_.speedTrackWindow) {
+	init();
 }
 
 HttpClient::~HttpClient() {
@@ -338,7 +364,6 @@ HttpClient::~HttpClient() {
 		this->worker_.join();
 
 	curl_multi_cleanup(this->multi_);
-	curl_global_cleanup();
 }
 
 float HttpClient::uplinkSpeed() const {
@@ -364,7 +389,7 @@ HttpResponse HttpClient::request(HttpRequest request, RequestPolicy policy) {
 }
 
 std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest request, RequestPolicy policy) {
-	TransferTask task(std::move(request), std::move(policy));
+	TransferTask task(std::move(request), std::move(policy), this);
 	std::shared_ptr<TransferState> state = task.state;
 
 	this->sema_.acquire();
@@ -386,7 +411,7 @@ HttpResponse HttpClient::request(HttpRequest request, RequestPolicy policy, Retr
 }
 
 std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy) {
-	TransferTask task(std::move(request), std::move(policy), std::move(retryPolicy));
+	TransferTask task(std::move(request), std::move(policy), std::move(retryPolicy), this);
 	std::shared_ptr<TransferState> state = task.state;
 
 	this->sema_.acquire();

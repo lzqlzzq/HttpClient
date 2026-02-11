@@ -66,8 +66,8 @@ void testAsyncConcurrent() {
 
 	const int numRequests = 5;
 
-	// Get the HttpClient singleton instance
-	auto& client = http_client::HttpClient::getInstance();
+	// Get the default HttpClient instance
+	auto& client = http_client::HttpClient::getDefault();
 
 	std::cout << "\nLaunching " << numRequests << " concurrent requests with different data..." << std::endl;
 
@@ -132,7 +132,7 @@ void testAsyncConcurrent() {
 }
 
 void testCancel() {
-	auto& client = http_client::HttpClient::getInstance();
+	auto& client = http_client::HttpClient::getDefault();
 
 	std::cout << "Cancel request through connection pool..." << std::endl;
 
@@ -153,7 +153,7 @@ void testCancel() {
 }
 
 void testPauseResume() {
-	auto& client = http_client::HttpClient::getInstance();
+	auto& client = http_client::HttpClient::getDefault();
 
 	std::cout << "Pause and Resume request test..." << std::endl;
 
@@ -216,7 +216,7 @@ void testRetry() {
 	std::cout << "Retry Request Test..." << std::endl;
 	std::cout << "========================================" << std::endl;
 
-	auto& client = http_client::HttpClient::getInstance();
+	auto& client = http_client::HttpClient::getDefault();
 
 	auto printTime = []() {
 		auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -348,7 +348,7 @@ int main() {
 		std::cout << "----------------------------------------" << std::endl;
 		testRetry();
 
-		auto& client = http_client::HttpClient::getInstance();
+		auto& client = http_client::HttpClient::getDefault();
 
 		std::cout << "\nAvarage download speed (bytes/s): " << std::to_string(client.downlinkSpeed());
 		std::cout << "\nAvarage upload speed (bytes/s): " << std::to_string(client.uplinkSpeed()) << std::endl;
