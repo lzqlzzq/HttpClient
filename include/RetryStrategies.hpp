@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cmath>
 #include <set>
-#include <vector>
 
 namespace http_client {
 namespace retry {
