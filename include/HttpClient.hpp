@@ -66,7 +66,6 @@ public:
 	HttpTransfer(const HttpTransfer&) = delete;
 	HttpTransfer& operator=(const HttpTransfer&) = delete;
 	HttpTransfer(HttpTransfer&& other) noexcept;
-	HttpTransfer& operator=(HttpTransfer&& other) noexcept;
 
 	const HttpResponse& getResponse() const;
 	HttpResponse detachResponse();
