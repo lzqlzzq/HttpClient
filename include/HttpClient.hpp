@@ -80,9 +80,11 @@ private:
 	CURL* curlEasy = NULL;
 	struct curl_slist* headers_ = NULL;
 	size_t contentLength = -1;
-	HttpRequest request;
+
+	const HttpRequest request;
 	HttpResponse response;
-	RequestPolicy policy;
+
+	const RequestPolicy policy;
 	const HttpClientSettings& settings_;
 
 	static size_t body_cb(void* ptr, size_t size, size_t nmemb, void* data);

@@ -2,6 +2,7 @@
 #include "RetryPolicy.hpp"
 #include "curl/curl.h"
 #include "curl/easy.h"
+#include "models.hpp"
 
 #include <atomic>
 #include <cstdlib>
@@ -78,30 +79,6 @@ HttpTransfer::HttpTransfer(HttpTransfer&& other) noexcept
 		curl_easy_setopt(curlEasy, CURLOPT_WRITEDATA, this);
 		curl_easy_setopt(curlEasy, CURLOPT_HEADERDATA, this);
 	}
-}
-
-HttpTransfer& HttpTransfer::operator=(HttpTransfer&& other) noexcept {
-	if (this != &other) {
-		// Clean up current resources
-		curl_easy_cleanup(this->curlEasy);
-		curl_slist_free_all(this->headers_);
-
-		// Move from other
-		this->curlEasy = std::exchange(other.curlEasy, nullptr);
-		this->headers_ = std::exchange(other.headers_, nullptr);
-		this->contentLength = other.contentLength;
-		this->request = std::move(other.request);
-		this->response = std::move(other.response);
-		this->policy = std::move(other.policy);
-		// Note: settings_ is a reference, cannot be reassigned
-
-		// Update callback data pointers to this
-		if (this->curlEasy) {
-			curl_easy_setopt(this->curlEasy, CURLOPT_WRITEDATA, this);
-			curl_easy_setopt(this->curlEasy, CURLOPT_HEADERDATA, this);
-		}
-	}
-	return *this;
 }
 
 const HttpResponse& HttpTransfer::getResponse() const {
