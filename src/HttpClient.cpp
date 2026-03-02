@@ -34,7 +34,7 @@ void HttpClientSettings::applyCurlEasySettings(CURL* handle) const {
 }
 
 void HttpClientSettings::applyCurlMultiSettings(CURLM* handle) const {
-#ifdef CURLMOPT_NETWORK_CHANGED
+#ifdef
 	curl_multi_setopt(handle, CURLMOPT_NETWORK_CHANGED, CURLMNWC_CLEAR_CONNS | CURLMNWC_CLEAR_DNS);
 #endif
 	curl_multi_setopt(handle, CURLMOPT_MAX_HOST_CONNECTIONS, this->maxHostConnections);
@@ -131,6 +131,8 @@ void HttpTransfer::reset() {
 		curl_easy_reset(this->curlEasy);
 
 	this->settings_.applyCurlEasySettings(this->curlEasy);
+	this->contentLength = 0;
+	this->response = HttpResponse{};
 
 	curl_easy_setopt(this->curlEasy, CURLOPT_URL, this->request.url.c_str());
 	if (this->policy.timeout > 0)
@@ -190,13 +192,24 @@ void HttpTransfer::reset() {
 
 size_t HttpTransfer::body_cb(void* ptr, size_t size, size_t nmemb, void* data) {
 	HttpTransfer* transfer = static_cast<HttpTransfer*>(data);
+	if (!ptr || size == 0 || nmemb == 0)
+		return 0;
+
+	const size_t chunkSize = size * nmemb;
+	if (size != 0 && (chunkSize / size != nmemb))
+		return 0;
+
+	const size_t maxSize = transfer->response.body.max_size();
+	if (chunkSize > maxSize - transfer->response.body.size())
+		return 0;
+
 	if(transfer->response.transferInfo.ttfb == 0)
 		transfer->response.transferInfo.ttfb = current_time() - transfer->response.transferInfo.startAt;
-	if(transfer->contentLength > transfer->response.body.capacity())
+	if(transfer->contentLength > transfer->response.body.capacity() && transfer->contentLength <= maxSize)
 		transfer->response.body.reserve(transfer->contentLength);
 
-	transfer->response.body.append((char*)ptr, size * nmemb);
-	return size * nmemb;
+	transfer->response.body.append(static_cast<const char*>(ptr), chunkSize);
+	return chunkSize;
 }
 
 size_t HttpTransfer::header_cb(void* ptr, size_t size, size_t nmemb, void* data) {
@@ -224,7 +237,12 @@ size_t HttpTransfer::header_cb(void* ptr, size_t size, size_t nmemb, void* data)
 	static const std::regex contentLengthRegex("^content-length:\\s*(\\d+)", std::regex::icase);
 	std::match_results<std::string_view::const_iterator> match;
 	if (std::regex_search(sv.begin(), sv.end(), match, contentLengthRegex)) {
-		transfer->contentLength = std::atoi(match[1].str().c_str());
+		unsigned long long parsed = std::strtoull(match[1].str().c_str(), nullptr, 10);
+		const size_t maxSize = transfer->response.body.max_size();
+		if (parsed > 0 && parsed <= maxSize)
+			transfer->contentLength = static_cast<size_t>(parsed);
+		else
+			transfer->contentLength = 0;
 	}
 
 	return len;

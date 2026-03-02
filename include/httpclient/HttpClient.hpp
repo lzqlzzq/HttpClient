@@ -78,7 +78,7 @@ private:
 
 	CURL* curlEasy = NULL;
 	struct curl_slist* headers_ = NULL;
-	size_t contentLength = -1;
+	size_t contentLength = 0;
 
 	const HttpRequest request;
 	HttpResponse response;
