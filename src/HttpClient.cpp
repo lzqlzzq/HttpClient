@@ -1,8 +1,11 @@
-#include "HttpClient.hpp"
-#include "RetryPolicy.hpp"
+#include "httpclient/HttpClient.hpp"
+#include "httpclient/RetryPolicy.hpp"
+#include "httpclient/models.hpp"
+
+extern "C" {
 #include "curl/curl.h"
 #include "curl/easy.h"
-#include "models.hpp"
+}
 
 #include <atomic>
 #include <cstdlib>
