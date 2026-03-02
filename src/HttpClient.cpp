@@ -1,6 +1,7 @@
 #include "httpclient/HttpClient.hpp"
 #include "httpclient/RetryPolicy.hpp"
 #include "httpclient/models.hpp"
+#include <curl/curl.h>
 
 extern "C" {
 #include "curl/curl.h"
@@ -151,6 +152,12 @@ void HttpTransfer::reset() {
 		unsigned long buf_size = std::clamp(this->policy.curlBufferSize, 1024u, static_cast<unsigned int>(CURL_MAX_READ_SIZE));
 		curl_easy_setopt(this->curlEasy, CURLOPT_BUFFERSIZE, buf_size);
 	}
+	if (std::getenv("HTTPCLIENT_CURL_VERBOSE")) {
+		curl_easy_setopt(this->curlEasy, CURLOPT_VERBOSE, 1L);
+	}
+
+	this->response.error.resize(CURL_ERROR_SIZE);
+	curl_easy_setopt(this->curlEasy, CURLOPT_ERRORBUFFER, this->response.error.c_str());
 
 	if (this->headers_) {
 		curl_slist_free_all(this->headers_);
