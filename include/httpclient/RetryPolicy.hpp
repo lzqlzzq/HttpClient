@@ -58,6 +58,7 @@ struct RetryPolicy {
 
     // Default constructor - uses default condition and exponential backoff
     // Defined in RetryStrategies.hpp after factory functions are available
+    RetryPolicy();
     RetryPolicy(uint32_t maxRetries, float totalTimeout, RetryConditionFn shouldRetry, BackoffScheduleFn getNextRetryTime);
 };
 
