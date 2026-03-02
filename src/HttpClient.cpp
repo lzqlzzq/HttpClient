@@ -34,7 +34,7 @@ void HttpClientSettings::applyCurlEasySettings(CURL* handle) const {
 }
 
 void HttpClientSettings::applyCurlMultiSettings(CURLM* handle) const {
-#ifdef
+#ifdef CURLMOPT_NETWORK_CHANGED
 	curl_multi_setopt(handle, CURLMOPT_NETWORK_CHANGED, CURLMNWC_CLEAR_CONNS | CURLMNWC_CLEAR_DNS);
 #endif
 	curl_multi_setopt(handle, CURLMOPT_MAX_HOST_CONNECTIONS, this->maxHostConnections);
