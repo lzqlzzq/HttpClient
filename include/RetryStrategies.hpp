@@ -201,12 +201,11 @@ inline BackoffScheduleFn minOf(Fns&&... fns) {
 
 } // namespace retry
 
-// Default constructor implementation for RetryPolicy
-inline RetryPolicy::RetryPolicy()
-    : maxRetries(3)
-    , totalTimeout(0)
-    , shouldRetry(retry::anyOf(retry::defaultCondition(), retry::httpStatusCondition()))
-    , getNextRetryTime(retry::exponentialBackoff())
-{}
+inline RetryPolicy::RetryPolicy(uint32_t maxRetries, float totalTimeout, RetryConditionFn shouldRetry, BackoffScheduleFn getNextRetryTime)
+    : maxRetries(maxRetries)
+    , totalTimeout(totalTimeout)
+    , shouldRetry(shouldRetry)
+    , getNextRetryTime(getNextRetryTime)
+    {}
 
 } // namespace http_client
