@@ -25,7 +25,7 @@ const HttpClientSettings& HttpClientSettings::getDefault() {
 
 void HttpClientSettings::applyCurlEasySettings(CURL* handle) const {
 	curl_easy_setopt(handle, CURLOPT_CA_CACHE_TIMEOUT, 604800L);
-	curl_easy_setopt(handle, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_NONE);
+	curl_easy_setopt(handle, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
 	curl_easy_setopt(handle, CURLOPT_FORBID_REUSE, 0L);
 	curl_easy_setopt(handle, CURLOPT_NOPROGRESS, 1L);
 	curl_easy_setopt(handle, CURLOPT_TCP_KEEPALIVE, 1L);
