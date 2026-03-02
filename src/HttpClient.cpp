@@ -152,8 +152,11 @@ void HttpTransfer::reset() {
 		curl_easy_setopt(this->curlEasy, CURLOPT_BUFFERSIZE, buf_size);
 	}
 
-	if(this->headers_)
+	if (this->headers_) {
 		curl_slist_free_all(this->headers_);
+		this->headers_ = nullptr;
+	}
+
 	for (const auto header : this->request.headers) {
 		this->headers_ = curl_slist_append(this->headers_, header.c_str());
 	}
