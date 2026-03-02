@@ -69,3 +69,5 @@ Testing/
 .cache/
 build/
 .vscode
+
+.DS_Store
