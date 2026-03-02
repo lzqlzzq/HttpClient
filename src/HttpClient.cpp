@@ -157,7 +157,7 @@ void HttpTransfer::reset() {
 	}
 
 	this->response.error.resize(CURL_ERROR_SIZE);
-	curl_easy_setopt(this->curlEasy, CURLOPT_ERRORBUFFER, this->response.error.c_str());
+	curl_easy_setopt(this->curlEasy, CURLOPT_ERRORBUFFER, this->response.error.data());
 
 	if (this->headers_) {
 		curl_slist_free_all(this->headers_);
