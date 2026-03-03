@@ -58,7 +58,7 @@ public:
 
 class HttpTransfer {
 public:
-	explicit HttpTransfer(HttpRequest request, RequestPolicy policy=RequestPolicy(),
+	explicit HttpTransfer(const HttpRequest& request, const RequestPolicy& policy=RequestPolicy(),
 	                      const HttpClientSettings& settings = HttpClientSettings::getDefault());
 	~HttpTransfer();
 
@@ -151,23 +151,23 @@ public:
 	void stop();
 
 	// Instance methods
-	HttpResponse request(HttpRequest request, RequestPolicy policy=RequestPolicy());
-	std::shared_ptr<TransferState> send_request(HttpRequest request, RequestPolicy policy=RequestPolicy());
+	HttpResponse request(const HttpRequest& request, const RequestPolicy& policy=RequestPolicy());
+	std::shared_ptr<TransferState> send_request(const HttpRequest& request, const RequestPolicy& policy=RequestPolicy());
 
-	HttpResponse request(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy);
-	std::shared_ptr<TransferState> send_request(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy);
+	HttpResponse request(const HttpRequest& request, const RequestPolicy& policy, const RetryPolicy& retryPolicy);
+	std::shared_ptr<TransferState> send_request(const HttpRequest& request, const RequestPolicy& policy, const RetryPolicy& retryPolicy);
 
 	// Static convenience methods using default client
-	static HttpResponse Request(HttpRequest request, RequestPolicy policy=RequestPolicy()) {
+	static HttpResponse Request(const HttpRequest& request, const RequestPolicy& policy=RequestPolicy()) {
 		return getDefault().request(std::move(request), std::move(policy));
 	}
-	static std::shared_ptr<TransferState> SendRequest(HttpRequest request, RequestPolicy policy=RequestPolicy()) {
+	static std::shared_ptr<TransferState> SendRequest(const HttpRequest& request, const RequestPolicy& policy=RequestPolicy()) {
 		return getDefault().send_request(std::move(request), std::move(policy));
 	}
-	static HttpResponse Request(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy) {
+	static HttpResponse Request(const HttpRequest& request, const RequestPolicy& policy, const RetryPolicy& retryPolicy) {
 		return getDefault().request(std::move(request), std::move(policy), std::move(retryPolicy));
 	}
-	static std::shared_ptr<TransferState> SendRequest(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy) {
+	static std::shared_ptr<TransferState> SendRequest(const HttpRequest& request, const RequestPolicy& policy, const RetryPolicy& retryPolicy) {
 		return getDefault().send_request(std::move(request), std::move(policy), std::move(retryPolicy));
 	}
 

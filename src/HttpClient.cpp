@@ -50,7 +50,7 @@ inline static double current_time() {
 }
 
 // HttpTransfer implementation
-HttpTransfer::HttpTransfer(HttpRequest request, RequestPolicy policy, const HttpClientSettings& settings) :
+HttpTransfer::HttpTransfer(const HttpRequest& request, const RequestPolicy& policy, const HttpClientSettings& settings) :
 	request(std::move(request)), policy(std::move(policy)), settings_(settings) {
 
 	static std::once_flag inited;
@@ -79,10 +79,7 @@ HttpTransfer::HttpTransfer(HttpTransfer&& other) noexcept
 	  response(std::move(other.response)),
 	  policy(std::move(other.policy)),
 	  settings_(other.settings_) {
-	if (curlEasy) {
-		curl_easy_setopt(curlEasy, CURLOPT_WRITEDATA, this);
-		curl_easy_setopt(curlEasy, CURLOPT_HEADERDATA, this);
-	}
+	this->reset();
 }
 
 const HttpResponse& HttpTransfer::getResponse() const {
@@ -390,13 +387,13 @@ float HttpClient::peakDownlinkSpeed() const {
 	return this->downlinkAvgSpeed.max();
 }
 
-HttpResponse HttpClient::request(HttpRequest request, RequestPolicy policy) {
+HttpResponse HttpClient::request(const HttpRequest& request, const RequestPolicy& policy) {
 	std::shared_ptr<TransferState> state = this->send_request(std::move(request), std::move(policy));
 
 	return state->future.get();
 }
 
-std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest request, RequestPolicy policy) {
+std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(const HttpRequest& request, const RequestPolicy& policy) {
 	TransferTask task(std::move(request), std::move(policy), this);
 	std::shared_ptr<TransferState> state = task.state;
 
@@ -412,13 +409,13 @@ std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest 
 	return state;
 }
 
-HttpResponse HttpClient::request(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy) {
+HttpResponse HttpClient::request(const HttpRequest& request, const RequestPolicy& policy, const RetryPolicy& retryPolicy) {
 	std::shared_ptr<TransferState> state = this->send_request(std::move(request), std::move(policy), std::move(retryPolicy));
 
 	return state->future.get();
 }
 
-std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(HttpRequest request, RequestPolicy policy, RetryPolicy retryPolicy) {
+std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(const HttpRequest& request, const RequestPolicy& policy, const RetryPolicy& retryPolicy) {
 	TransferTask task(std::move(request), std::move(policy), std::move(retryPolicy), this);
 	std::shared_ptr<TransferState> state = task.state;
 
