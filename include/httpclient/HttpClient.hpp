@@ -15,10 +15,6 @@
 
 namespace http_client {
 
-#define MAX_CONNECTION 8L
-#define POLL_MS 100L
-#define SPEED_TRACK_WINDOW 128L
-
 /**
  * Configuration class for HttpClient.
  * Provides virtual methods for customizing CURL handle settings.
@@ -34,13 +30,13 @@ public:
 	static const HttpClientSettings& getDefault();
 
 	// Connection pool settings
-	long maxConnections = MAX_CONNECTION;
-	long pollTimeoutMs = POLL_MS;
-	size_t speedTrackWindow = SPEED_TRACK_WINDOW;
+	long maxConnections = 24L;
+	long pollTimeoutMs = 100;
+	size_t speedTrackWindow = 128;
 
 	// CURL multi settings
-	long maxHostConnections = 2L;
-	long maxTotalConnections = 4L;
+	long maxHostConnections = 6L;
+	long maxTotalConnections = 12L;
 
 	/**
 	 * Apply default settings to a CURL easy handle.

@@ -40,8 +40,8 @@ void HttpClientSettings::applyCurlMultiSettings(CURLM* handle) const {
 #endif
 	curl_multi_setopt(handle, CURLMOPT_MAX_HOST_CONNECTIONS, this->maxHostConnections);
 	curl_multi_setopt(handle, CURLMOPT_MAX_TOTAL_CONNECTIONS, this->maxTotalConnections);
-	curl_multi_setopt(handle, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
 	curl_multi_setopt(handle, CURLMOPT_MAXCONNECTS, this->maxConnections);
+	curl_multi_setopt(handle, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX);
 }
 
 inline static double current_time() {
@@ -349,7 +349,7 @@ void HttpClient::init() {
 
 HttpClient::HttpClient()
 	: settings_(HttpClientSettings::getDefault()),
-	  sema_(settings_.maxConnections, settings_.maxConnections),
+	  sema_(settings_.maxTotalConnections, settings_.maxTotalConnections),
 	  uplinkAvgSpeed(settings_.speedTrackWindow),
 	  downlinkAvgSpeed(settings_.speedTrackWindow) {
 	init();
