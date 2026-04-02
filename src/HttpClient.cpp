@@ -481,11 +481,11 @@ void HttpClient::worker_loop() {
 
 		int poll_timeout;
 		if (t < 0)
-			poll_timeout = POLL_MS;
+			poll_timeout = this->settings_.pollTimeoutMs;
 		else if (t == 0)
 			poll_timeout = 0;
 		else
-			poll_timeout = (int)std::min<long>(t, POLL_MS);
+			poll_timeout = (int)std::min<long>(t, this->settings_.pollTimeoutMs);
 
 		// Handle retry - only process retries whose time has come
 		while(!this->pendingRetries_.empty()) {
