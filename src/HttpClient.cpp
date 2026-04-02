@@ -1,14 +1,10 @@
 #include "httpclient/HttpClient.hpp"
-#include "httpclient/RetryPolicy.hpp"
-#include "httpclient/models.hpp"
-#include <curl/curl.h>
 
 extern "C" {
 #include "curl/curl.h"
 #include "curl/easy.h"
 }
 
-#include <atomic>
 #include <cstdlib>
 #include <mutex>
 #include <optional>

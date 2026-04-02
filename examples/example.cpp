@@ -1,9 +1,7 @@
-#include "HttpClient.hpp"
-#include "RetryStrategies.hpp"
+#include "httpclient/HttpClient.hpp"
+#include "httpclient/RetryStrategies.hpp"
 
-#include <cassert>
 #include <chrono>
-#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <mutex>

@@ -75,7 +75,7 @@ cmake --build build
 For simple one-off requests, use `HttpTransfer` directly:
 
 ```cpp
-#include "HttpClient.hpp"
+#include "httpclient/HttpClient.hpp"
 
 int main() {
     curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -114,7 +114,7 @@ transfer.perform_blocking();
 The `HttpClient` manages its own curl initialization and connection pool:
 
 ```cpp
-#include "HttpClient.hpp"
+#include "httpclient/HttpClient.hpp"
 
 int main() {
     // Use static convenience methods (uses default client internally)
@@ -173,8 +173,8 @@ auto response = state->future.get();
 ### Retry with Backoff
 
 ```cpp
-#include "HttpClient.hpp"
-#include "RetryStrategies.hpp"
+#include "httpclient/HttpClient.hpp"
+#include "httpclient/RetryStrategies.hpp"
 
 http_client::HttpRequest request;
 request.url = "https://httpbin.org/status/503";
@@ -234,7 +234,7 @@ auto response = client.request(request, policy);
 ### Hash Utilities
 
 ```cpp
-#include "HashHelper.hpp"
+#include "httpclient/HashHelper.hpp"
 
 // One-shot hashing
 std::string hash = http_client::Hash::sha256("Hello, World!");
