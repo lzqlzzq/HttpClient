@@ -1,45 +1,32 @@
 # HttpClient
 
-A modern C++17 HTTP client library built on top of libcurl, featuring:
+`HttpClient` is a C++17 HTTP client library built on top of libcurl multi/easy APIs.
 
-- blocking requests (`HttpTransfer`)
-- async/concurrent requests with connection pooling (`HttpClient`)
-- request control (`cancel/pause/resume`)
-- configurable retry policy and backoff strategies
-- built-in hash utilities (OpenSSL EVP wrappers)
+It provides:
 
-## Features
-
-- Blocking HTTP requests via `HttpTransfer`
-- Async request queue and worker thread via `HttpClient`
-- HTTP/2 capable (libcurl multi interface)
-- Retry framework:
-  - `RetryPolicy`
-  - retry conditions (`retry::defaultCondition`, `retry::httpStatusCondition`, ...)
-  - backoff strategies (`retry::exponentialBackoff`, `retry::fixedDelay`, ...)
-- Transfer control:
-  - `TransferState::cancel()`
-  - `TransferState::pause()` / `TransferState::resume()`
-- Speed tracking (`uplinkSpeed`, `downlinkSpeed`, peak variants)
-- Hash helper APIs (`md5`, `sha1`, `sha2`, `sha3`, `blake2`, `sm3`, ...)
+- blocking requests via `HttpTransfer`
+- async/concurrent requests via pooled `HttpClient`
+- runtime transfer control (`cancel`, `pause`, `resume`)
+- pluggable retry condition + backoff scheduling
+- hashing helpers based on OpenSSL EVP
 
 ## Requirements
 
 - C++17 compiler
 - CMake >= 3.14
 - OpenSSL
-- libcurl >= 8.10.0 (if unavailable, vendored curl is fetched and built)
+- libcurl >= 8.10.0 (or vendored curl auto-built by CMake)
 
 ## Build
 
-### Build library only
+### Library only
 
 ```bash
 cmake -S . -B build
 cmake --build build
 ```
 
-### Build with example program
+### Build example
 
 ```bash
 cmake -S . -B build -DHTTPCLIENT_BUILD_EXAMPLES=ON
@@ -49,10 +36,10 @@ cmake --build build
 
 Notes:
 
-- The project option is `HTTPCLIENT_BUILD_EXAMPLES`.
-- Vendored curl examples are explicitly disabled; only this project's `example` target is controlled by the option above.
+- `HTTPCLIENT_BUILD_EXAMPLES` controls only `examples/example.cpp`.
+- If system libcurl is missing or too old, CMake fetches and builds `curl-8_11_1` with HTTP-only options.
 
-## Integration
+## Integrate In Your Project
 
 ### Option 1: `add_subdirectory`
 
@@ -68,7 +55,7 @@ include(FetchContent)
 
 FetchContent_Declare(
   HttpClient
-  GIT_REPOSITORY https://github.com/your-org/HttpClient.git
+  GIT_REPOSITORY https://github.com/lzqlzzq/HttpClient.git
   GIT_TAG main
 )
 FetchContent_MakeAvailable(HttpClient)
@@ -78,7 +65,7 @@ target_link_libraries(your_target PRIVATE HttpClient)
 
 ## Usage
 
-### 1) Blocking request (`HttpTransfer`)
+### Blocking request (`HttpTransfer`)
 
 ```cpp
 #include "httpclient/HttpClient.hpp"
@@ -92,11 +79,11 @@ int main() {
     transfer.perform_blocking();
 
     const auto& resp = transfer.getResponse();
-    // resp.status / resp.body / resp.headers / resp.error
+    // resp.status / resp.headers / resp.body / resp.error
 }
 ```
 
-### 2) Async request (`HttpClient`)
+### Async request (`HttpClient`)
 
 ```cpp
 #include "httpclient/HttpClient.hpp"
@@ -111,25 +98,23 @@ auto state = client.send_request(req);
 auto resp = state->future.get();
 ```
 
-Or static convenience API:
+Static convenience API:
 
 ```cpp
 auto resp = http_client::HttpClient::Request(req);
 ```
 
-### 3) Cancel / pause / resume
+### Cancel / pause / resume
 
 ```cpp
 auto state = http_client::HttpClient::SendRequest(req);
-
 state->pause();
 state->resume();
-// or state->cancel();
-
+// state->cancel();
 auto resp = state->future.get();
 ```
 
-### 4) Retry policy
+### Retry policy
 
 ```cpp
 #include "httpclient/HttpClient.hpp"
@@ -141,90 +126,71 @@ retry.totalTimeout = 30.0f;
 retry.shouldRetry = http_client::retry::httpStatusCondition({500, 502, 503, 504});
 retry.getNextRetryTime = http_client::retry::exponentialBackoff(1.0, 10.0, 2.0, 0.2);
 
-auto resp = http_client::HttpClient::Request(
-    req,
-    http_client::RequestPolicy(),
-    retry
-);
+auto resp = http_client::HttpClient::Request(req, http_client::RequestPolicy(), retry);
 ```
 
-`RetryPolicy()` default constructor is available and initializes:
+Default `RetryPolicy()`:
 
 - `maxRetries = 3`
-- `totalTimeout = 0` (no total timeout)
+- `totalTimeout = 0` (unbounded total time)
 - `shouldRetry = retry::defaultCondition()`
 - `getNextRetryTime = retry::exponentialBackoff()`
 
-### 5) Hash helper
+### Hash helper
 
 ```cpp
 #include "httpclient/HashHelper.hpp"
 
-std::string digest = http_client::Hash::sha256("hello");
+std::string bin = http_client::Hash::sha256("hello");
+std::string hex = http_client::Hash::hexdigest(bin);
 ```
 
-## Public API Quick Reference
+## API Summary
 
 ### `HttpRequest`
 
-- `std::string url`
-- `std::string methodName`
-- `std::vector<std::string> headers`
-- `std::string body`
+- `url`
+- `methodName` (e.g. `GET`, `POST`, `PATCH`, `PUT`, `DELETE`, `HEAD`)
+- `headers`
+- `body`
 
 ### `RequestPolicy`
 
-- `float timeout`
-- `float connTimeout`
-- `uint32_t lowSpeedLimit`
-- `uint32_t lowSpeedTime`
-- `uint32_t sendSpeedLimit`
-- `uint32_t recvSpeedLimit`
-- `uint32_t curlBufferSize`
+- `timeout` (seconds)
+- `connTimeout` (seconds)
+- `lowSpeedLimit`, `lowSpeedTime`
+- `sendSpeedLimit`, `recvSpeedLimit`
+- `curlBufferSize`
 
 ### `HttpResponse`
 
-- `long status`
-- `std::vector<std::string> headers`
-- `std::string body`
-- `std::string error`
-- `TransferInfo transferInfo`
-
-### `TransferInfo`
-
-Includes fine-grained timings such as:
-
-- `startAt`, `queue`, `connect`, `appConnect`, `preTransfer`, `postTransfer`
-- `ttfb`, `startTransfer`, `receiveTransfer`, `total`, `redir`, `completeAt`
+- `status`
+- `headers`
+- `body`
+- `error` (curl error buffer)
+- `transferInfo` (timing breakdown)
 
 ### `HttpClient::TransferState`
 
-- `std::shared_future<HttpResponse> future`
+- `future`
 - `pause()`, `resume()`, `cancel()`
 - `get_state()`
 - `hasRetry()`, `getAttempt()`, `getRetryContext()`
 
-State enum values:
+State values:
 
 - `Pending`, `Ongoing`, `Completed`, `Pause`, `Paused`, `Resume`, `Failed`, `Cancel`
 
-### `RetryPolicy`
+### Retry helpers (`namespace http_client::retry`)
 
-- `uint32_t maxRetries`
-- `float totalTimeout`
-- `RetryConditionFn shouldRetry`
-- `BackoffScheduleFn getNextRetryTime`
-
-## Retry Strategies
-
-### Retry conditions (`namespace http_client::retry`)
+Conditions:
 
 - `defaultCondition()`
 - `httpStatusCondition(codes)`
 - `anyOf(...)`
 - `allOf(...)`
 
-### Backoff strategies (`namespace http_client::retry`)
+Backoff:
 
 - `exponentialBackoff(baseDelay, maxDelay, multiplier, jitterFactor)`
 - `linearBackoff(initialDelay, increment, maxDelay)`
@@ -233,10 +199,12 @@ State enum values:
 - `maxOf(...)`
 - `minOf(...)`
 
-## Notes
+## Runtime Notes
 
-- Example program (`examples/example.cpp`) depends on internet access (uses `https://httpbin.org`).
-- Header names are case-sensitive in this repo (for example, `Models.hpp`, `Utils.hpp`).
+- Set `HTTPCLIENT_CURL_VERBOSE=1` to enable libcurl verbose output for requests.
+- `HttpClientSettings` can be subclassed to override curl easy/multi options.
+- If you construct `HttpClient` with a custom `HttpClientSettings` reference, ensure the settings object outlives the client.
+- `examples/example.cpp` requires internet access (`https://httpbin.org`).
 
 ## License
 
