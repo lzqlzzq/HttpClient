@@ -6,8 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Options
-option(BUILD_EXAMPLES "Build example programs" OFF)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+option(HTTPCLIENT_BUILD_EXAMPLES "Build HttpClient example programs" OFF)
 
 # Find libcurl
 find_package(CURL 8.10.0 QUIET)
@@ -28,6 +27,9 @@ else()
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
     set(BUILD_LIBCURL_DOCS OFF CACHE BOOL "" FORCE)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(USE_LIBIDN2 OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
 
     # Protocol configuration - HTTP(S) only
     set(HTTP_ONLY ON CACHE BOOL "" FORCE)
@@ -58,6 +60,9 @@ target_include_directories(HttpClient
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_link_libraries(HttpClient PRIVATE MyCurl::curl OpenSSL::Crypto)
+target_link_libraries(HttpClient INTERFACE MyCurl::curl OpenSSL::Crypto)
 
-add_executable(example EXCLUDE_FROM_ALL examples/example.cpp)
-target_link_libraries(example PRIVATE HttpClient)
+if(HTTPCLIENT_BUILD_EXAMPLES)
+    add_executable(example examples/example.cpp)
+    target_link_libraries(example PRIVATE HttpClient)
+endif()

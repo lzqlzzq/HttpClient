@@ -213,14 +213,14 @@ private:
 	std::queue<CURL*> events_;
 
 	struct RetryCompare {
-		bool operator()(const TransferTask& a,
-		                const TransferTask& b) const {
-			return a.retryAt > b.retryAt;  // Earlier time = higher priority
+		bool operator()(const std::unique_ptr<TransferTask>& a,
+		                const std::unique_ptr<TransferTask>& b) const {
+			return a->retryAt > b->retryAt;  // Earlier time = higher priority
 		}
 	};
 
-	std::priority_queue<TransferTask,
-	                    std::vector<TransferTask>,
+	std::priority_queue<std::unique_ptr<TransferTask>,
+	                    std::vector<std::unique_ptr<TransferTask>>,
 	                    RetryCompare> pendingRetries_;
 
 	CURLM* multi_;

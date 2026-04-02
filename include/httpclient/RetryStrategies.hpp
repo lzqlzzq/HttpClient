@@ -201,6 +201,9 @@ inline BackoffScheduleFn minOf(Fns&&... fns) {
 
 } // namespace retry
 
+inline RetryPolicy::RetryPolicy()
+    : RetryPolicy(3, 0, retry::defaultCondition(), retry::exponentialBackoff()) {}
+
 inline RetryPolicy::RetryPolicy(uint32_t maxRetries, float totalTimeout, RetryConditionFn shouldRetry, BackoffScheduleFn getNextRetryTime)
     : maxRetries(maxRetries)
     , totalTimeout(totalTimeout)

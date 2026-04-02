@@ -486,17 +486,17 @@ void HttpClient::worker_loop() {
 		// Handle retry - only process retries whose time has come
 		while(!this->pendingRetries_.empty()) {
 			double now = current_time();
-			double deltaTime = this->pendingRetries_.top().retryAt - now;
+			double deltaTime = this->pendingRetries_.top()->retryAt - now;
 
 			if(deltaTime <= 0 && sema_.try_acquire()) {
-				auto&& top = const_cast<TransferTask&>(this->pendingRetries_.top());
-				TransferTask task = std::move(top);
+				auto taskPtr = std::move(
+					const_cast<std::unique_ptr<TransferTask>&>(this->pendingRetries_.top()));
 				this->pendingRetries_.pop();
 
-				task.transfer.reset();
+				taskPtr->transfer.reset();
 
 				std::unique_lock lk(this->mutex_);
-				this->requests.emplace(std::move(task));
+				this->requests.emplace(std::move(*taskPtr));
 			} else {
 				// Adjust poll_timeout to wake up when next retry is due
 				int retryWaitMs = static_cast<int>(std::max(0.0, deltaTime) * 1000);
@@ -627,7 +627,7 @@ void HttpClient::handle_retry_completion(std::list<TransferTask>::iterator it, C
 		it->retryAt = policy.getNextRetryTime(context);
 
 		this->curl2Task.erase(it->transfer.curlEasy);
-		this->pendingRetries_.emplace(std::move(*it));
+		this->pendingRetries_.emplace(std::make_unique<TransferTask>(std::move(*it)));
 		this->transfers.erase(it);
 	} else {
 		// No need for retry - complete the request
