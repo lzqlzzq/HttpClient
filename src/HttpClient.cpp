@@ -484,19 +484,27 @@ void HttpClient::worker_loop() {
 			poll_timeout = (int)std::min<long>(t, this->settings_.pollTimeoutMs);
 
 		// Handle retry - only process retries whose time has come
+		constexpr int kMinRetryPollWaitMs = 50;
 		while(!this->pendingRetries_.empty()) {
 			double now = current_time();
 			double deltaTime = this->pendingRetries_.top()->retryAt - now;
 
-			if(deltaTime <= 0 && sema_.try_acquire()) {
-				auto taskPtr = std::move(
-					const_cast<std::unique_ptr<TransferTask>&>(this->pendingRetries_.top()));
-				this->pendingRetries_.pop();
+			if (deltaTime <= 0) {
+				if (sema_.try_acquire()) {
+					auto taskPtr = std::move(
+						const_cast<std::unique_ptr<TransferTask>&>(this->pendingRetries_.top()));
+					this->pendingRetries_.pop();
 
-				taskPtr->transfer.reset();
+					taskPtr->transfer.reset();
 
-				std::unique_lock lk(this->mutex_);
-				this->requests.emplace(std::move(*taskPtr));
+					std::unique_lock lk(this->mutex_);
+					this->requests.emplace(std::move(*taskPtr));
+				} else {
+					// Retry is due but no semaphore token is available.
+					// Sleep at least 1ms to avoid poll_timeout=0 busy-spin.
+					poll_timeout = std::max(kMinRetryPollWaitMs, std::min(poll_timeout, kMinRetryPollWaitMs));
+					break;
+				}
 			} else {
 				// Adjust poll_timeout to wake up when next retry is due
 				int retryWaitMs = static_cast<int>(std::max(0.0, deltaTime) * 1000);
@@ -620,6 +628,9 @@ void HttpClient::handle_retry_completion(std::list<TransferTask>::iterator it, C
 		it->transfer.getResponse(),
 		curlCode, now});
 
+	// Retry callbacks run on HttpClient's internal worker thread.
+	// Keep callbacks short and non-blocking; do not synchronously call
+	// request/send_request on the same HttpClient instance from here.
 	if (policy.shouldRetry && policy.shouldRetry(context) &&
 		context.attemptCount() < policy.maxRetries &&
 		((policy.totalTimeout <= 0) ||

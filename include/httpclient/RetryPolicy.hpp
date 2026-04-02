@@ -35,6 +35,12 @@ struct RetryContext {
 /**
  * Type alias for retry condition function.
  * Returns true if the request should be retried based on the context.
+ *
+ * Execution model:
+ * - Invoked on HttpClient's internal worker thread.
+ * - Must be short and non-blocking.
+ * - Should not synchronously call request/send_request on the same HttpClient
+ *   instance to avoid self-blocking the worker.
  */
 using RetryConditionFn = std::function<bool(const RetryContext&)>;
 
@@ -42,6 +48,10 @@ using RetryConditionFn = std::function<bool(const RetryContext&)>;
  * Type alias for backoff scheduling function.
  * Returns the absolute timestamp in seconds when to retry next.
  * Based on ctx.lastCompleteAt() from the last response.
+ *
+ * Execution model is the same as RetryConditionFn: worker-thread execution,
+ * keep it short/non-blocking, and avoid synchronous re-entry to the same
+ * HttpClient instance.
  */
 using BackoffScheduleFn = std::function<double(const RetryContext&)>;
 
