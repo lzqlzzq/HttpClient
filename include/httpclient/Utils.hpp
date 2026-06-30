@@ -11,6 +11,9 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
+#include <regex>
+#include <optional>
+
 
 namespace http_client {
 namespace util {
@@ -158,5 +161,29 @@ private:
     unsigned int count_;
     const unsigned int max_count_;
 };
+
+std::optional<std::string> get_header_value(
+    const std::string& headers,
+    const std::string& key
+) {
+    std::string escaped;
+    for (char c : key) {
+        if (std::string_view{R"(\.^$|()[]{}*+?)"}.find(c) != std::string::npos)
+            escaped += '\\';
+        escaped += c;
+    }
+
+    std::regex re(
+        "(?:^|\\r?\\n)" + escaped + R"(\s*:\s*([^\r\n]*))",
+        std::regex_constants::icase
+    );
+
+    std::smatch m;
+    if (std::regex_search(headers, m, re)) {
+        return m[1].str();
+    }
+
+    return std::nullopt;
+}
 
 } // namespace http_client
