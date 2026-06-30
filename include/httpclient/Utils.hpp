@@ -162,7 +162,7 @@ private:
     const unsigned int max_count_;
 };
 
-std::optional<std::string> get_header_value(
+inline std::optional<std::string> get_header_value(
     const std::string& headers,
     const std::string& key
 ) {
