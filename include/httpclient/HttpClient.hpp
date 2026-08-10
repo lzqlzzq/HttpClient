@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Export.hpp"
 #include "Models.hpp"
 #include "Utils.hpp"
 #include "RetryPolicy.hpp"
@@ -21,7 +22,7 @@ namespace http_client {
  * Provides virtual methods for customizing CURL handle settings.
  * Inherit from this class to customize behavior.
  */
-class HttpClientSettings {
+class HTTPCLIENT_API HttpClientSettings {
 public:
 	virtual ~HttpClientSettings() = default;
 
@@ -54,7 +55,7 @@ public:
 };
 
 
-class HttpTransfer {
+class HTTPCLIENT_API HttpTransfer {
 public:
 	explicit HttpTransfer(const HttpRequest& request, const RequestPolicy& policy=RequestPolicy(),
 	                      const HttpClientSettings& settings = HttpClientSettings::getDefault());
@@ -93,7 +94,7 @@ private:
 	                       curl_off_t ultotal, curl_off_t ulnow);
 };
 
-class HttpClient {
+class HTTPCLIENT_API HttpClient {
 public:
 	class TransferState {
 	public:

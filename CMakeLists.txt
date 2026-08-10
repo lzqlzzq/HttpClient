@@ -58,14 +58,33 @@ add_library(HttpClient
     src/HttpClient.cpp
     src/HashHelper.cpp
 )
+set_target_properties(HttpClient PROPERTIES
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN YES
+)
 target_include_directories(HttpClient
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_compile_definitions(HttpClient PUBLIC NOMINMAX)
-target_link_libraries(HttpClient PRIVATE MyCurl::curl OpenSSL::Crypto)
-target_link_libraries(HttpClient INTERFACE MyCurl::curl OpenSSL::Crypto)
+if(BUILD_SHARED_LIBS)
+    target_compile_definitions(HttpClient PRIVATE HTTPCLIENT_EXPORTS)
+else()
+    target_compile_definitions(HttpClient PUBLIC HTTPCLIENT_STATIC_DEFINE)
+endif()
+target_link_libraries(HttpClient
+    PRIVATE
+        $<BUILD_INTERFACE:MyCurl::curl>
+        $<BUILD_INTERFACE:OpenSSL::Crypto>
+        $<INSTALL_INTERFACE:CURL::libcurl>
+        $<INSTALL_INTERFACE:OpenSSL::Crypto>
+    INTERFACE
+        $<BUILD_INTERFACE:MyCurl::curl>
+        $<BUILD_INTERFACE:OpenSSL::Crypto>
+        $<INSTALL_INTERFACE:CURL::libcurl>
+        $<INSTALL_INTERFACE:OpenSSL::Crypto>
+)
 
 install(TARGETS HttpClient
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Export.hpp"
+
 #include <istream>
 #include <string>
 #include <string_view>
@@ -34,7 +36,7 @@ constexpr size_t HASHER_BUFFER_SIZE = 4096;
 	HASH_ALGORITHM(ripemd160, EVP_ripemd160) \
 	HASH_ALGORITHM(sm3, EVP_sm3)
 
-class Hash {
+class HTTPCLIENT_API Hash {
 /*
 NOT THREAD-SAFE!!!
 */
