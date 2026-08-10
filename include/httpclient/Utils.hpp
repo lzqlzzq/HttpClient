@@ -74,11 +74,13 @@ inline float jitter_generator(float max) {
 template <typename T, class = std::enable_if_t<std::is_arithmetic<T>::value>>
 class SlidingWindow {
 public:
-    explicit SlidingWindow(size_t capacity) : cap(capacity) {
-        this->buffer.reserve(capacity);
-    };
+    explicit SlidingWindow(size_t capacity) : buffer(capacity), cap(capacity) {}
 
     void push(T value) {
+        std::lock_guard<std::mutex> lock(this->mutex_);
+        if (this->cap == 0)
+            return;
+
         if (this->size < this->cap) [[__unlikely__]] {
             // Not full
             this->buffer[this->head_] = value;
@@ -95,19 +97,25 @@ public:
     }
 
     T mean() const {
+        std::lock_guard<std::mutex> lock(this->mutex_);
         return this->size ? static_cast<double>(sum_) / this->size : 0.0;
     }
 
     T max() const {
-        auto it = std::max_element(this->buffer.begin(), this->buffer.end());
-        return it == this->buffer.end() ? 0 : *it;
+        std::lock_guard<std::mutex> lock(this->mutex_);
+        if (this->size == 0)
+            return 0;
+
+        return *std::max_element(this->buffer.begin(), this->buffer.begin() + this->size);
     }
 
     void clear() {
+        std::lock_guard<std::mutex> lock(this->mutex_);
         this->head_ = 0;
         this->size = 0;
+        this->sum_ = 0.0;
         std::fill(this->buffer.begin(), this->buffer.end(), 0);
-    };
+    }
 
 private:
     std::vector<T> buffer;
@@ -116,6 +124,7 @@ private:
     size_t head_ = 0;
 
     double sum_ = 0.0;
+    mutable std::mutex mutex_;
 };
 
 class BoundedSemaphore {
