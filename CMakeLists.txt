@@ -10,6 +10,7 @@ option(HTTPCLIENT_BUILD_EXAMPLES "Build HttpClient example programs" OFF)
 option(HTTPCLIENT_BUILD_TESTS "Build HttpClient tests" OFF)
 
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 # Find libcurl
 find_package(CURL 8.10.0 QUIET)
@@ -87,12 +88,36 @@ target_link_libraries(HttpClient
 )
 
 install(TARGETS HttpClient
+    EXPORT HttpClientTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(EXPORT HttpClientTargets
+    FILE HttpClientTargets.cmake
+    NAMESPACE HttpClient::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/HttpClient
+)
+
+configure_package_config_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/HttpClientConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/HttpClientConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/HttpClient
+)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/HttpClientConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/HttpClientConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/HttpClientConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/HttpClient
 )
 
 if(HTTPCLIENT_BUILD_EXAMPLES)
