@@ -9,6 +9,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(HTTPCLIENT_BUILD_EXAMPLES "Build HttpClient example programs" OFF)
 option(HTTPCLIENT_BUILD_TESTS "Build HttpClient tests" OFF)
 
+include(GNUInstallDirs)
+
 # Find libcurl
 find_package(CURL 8.10.0 QUIET)
 find_package(OpenSSL REQUIRED)
@@ -58,11 +60,21 @@ add_library(HttpClient
 )
 target_include_directories(HttpClient
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_compile_definitions(HttpClient PUBLIC NOMINMAX)
 target_link_libraries(HttpClient PRIVATE MyCurl::curl OpenSSL::Crypto)
 target_link_libraries(HttpClient INTERFACE MyCurl::curl OpenSSL::Crypto)
+
+install(TARGETS HttpClient
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
 
 if(HTTPCLIENT_BUILD_EXAMPLES)
     add_executable(example examples/example.cpp)
