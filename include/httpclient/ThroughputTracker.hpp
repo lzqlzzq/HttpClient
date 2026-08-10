@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Export.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cstddef>

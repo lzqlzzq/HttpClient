@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Export.hpp"
 #include "RetryPolicy.hpp"
 #include "Utils.hpp"
 

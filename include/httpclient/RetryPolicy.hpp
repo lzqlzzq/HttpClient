@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Export.hpp"
 #include "Models.hpp"
 
 #include <cstdint>

@@ -60,6 +60,7 @@ target_include_directories(HttpClient
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+target_compile_definitions(HttpClient PUBLIC NOMINMAX)
 target_link_libraries(HttpClient PRIVATE MyCurl::curl OpenSSL::Crypto)
 target_link_libraries(HttpClient INTERFACE MyCurl::curl OpenSSL::Crypto)
 
