@@ -1,4 +1,5 @@
 #include "httpclient/HttpClient.hpp"
+#include "httpclient/RetryStrategies.hpp"
 
 extern "C" {
 #include "curl/curl.h"
@@ -10,6 +11,7 @@ extern "C" {
 #include <optional>
 #include <regex>
 #include <thread>
+#include <utility>
 
 namespace http_client {
 
@@ -74,7 +76,8 @@ HttpTransfer::HttpTransfer(HttpTransfer&& other) noexcept
 	  request(std::move(other.request)),
 	  response(std::move(other.response)),
 	  policy(std::move(other.policy)),
-	  settings_(other.settings_) {
+	  settings_(other.settings_),
+	  throughputTracker_(other.throughputTracker_) {
 	this->reset();
 }
 
@@ -127,6 +130,8 @@ void HttpTransfer::reset() {
 	this->settings_.applyCurlEasySettings(this->curlEasy);
 	this->contentLength = 0;
 	this->response = HttpResponse{};
+	this->uploadedBytes_.reset();
+	this->downloadedBytes_.reset();
 
 	curl_easy_setopt(this->curlEasy, CURLOPT_URL, this->request.url.c_str());
 	if (this->policy.timeout > 0)
@@ -191,6 +196,9 @@ void HttpTransfer::reset() {
 	curl_easy_setopt(this->curlEasy, CURLOPT_WRITEDATA, this);
 	curl_easy_setopt(this->curlEasy, CURLOPT_HEADERFUNCTION, HttpTransfer::header_cb);
 	curl_easy_setopt(this->curlEasy, CURLOPT_HEADERDATA, this);
+	curl_easy_setopt(this->curlEasy, CURLOPT_NOPROGRESS, 0L);
+	curl_easy_setopt(this->curlEasy, CURLOPT_XFERINFOFUNCTION, HttpTransfer::progress_cb);
+	curl_easy_setopt(this->curlEasy, CURLOPT_XFERINFODATA, this);
 }
 
 size_t HttpTransfer::body_cb(void* ptr, size_t size, size_t nmemb, void* data) {
@@ -249,6 +257,23 @@ size_t HttpTransfer::header_cb(void* ptr, size_t size, size_t nmemb, void* data)
 	}
 
 	return len;
+}
+
+int HttpTransfer::progress_cb(void* data, curl_off_t, curl_off_t dlnow,
+                             curl_off_t, curl_off_t ulnow) {
+	HttpTransfer* transfer = static_cast<HttpTransfer*>(data);
+	if (!transfer)
+		return 0;
+
+	const uint64_t downloaded = dlnow > 0 ? static_cast<uint64_t>(dlnow) : 0;
+	const uint64_t uploaded = ulnow > 0 ? static_cast<uint64_t>(ulnow) : 0;
+	const uint64_t downloadDelta = transfer->downloadedBytes_.update(downloaded);
+	const uint64_t uploadDelta = transfer->uploadedBytes_.update(uploaded);
+
+	if (transfer->throughputTracker_ && (uploadDelta != 0 || downloadDelta != 0))
+		transfer->throughputTracker_->record(uploadDelta, downloadDelta);
+
+	return 0;
 }
 
 // HttpClient::TransferState implementation
@@ -346,16 +371,14 @@ void HttpClient::init() {
 HttpClient::HttpClient()
 	: settings_(HttpClientSettings::getDefault()),
 	  sema_(settings_.maxTotalConnections, settings_.maxTotalConnections),
-	  uplinkAvgSpeed(settings_.speedTrackWindow),
-	  downlinkAvgSpeed(settings_.speedTrackWindow) {
+	  throughputTracker_(settings_.speedAverageWindowSeconds) {
 	init();
 }
 
 HttpClient::HttpClient(const HttpClientSettings& settings)
 	: settings_(settings),
 	  sema_(settings_.maxConnections, settings_.maxConnections),
-	  uplinkAvgSpeed(settings_.speedTrackWindow),
-	  downlinkAvgSpeed(settings_.speedTrackWindow) {
+	  throughputTracker_(settings_.speedAverageWindowSeconds) {
 	init();
 }
 
@@ -367,20 +390,20 @@ HttpClient::~HttpClient() {
 	curl_multi_cleanup(this->multi_);
 }
 
-float HttpClient::uplinkSpeed() const {
-	return this->uplinkAvgSpeed.mean();
+double HttpClient::uplinkSpeed() const {
+	return this->throughputTracker_.uplinkSpeed();
 }
 
-float HttpClient::downlinkSpeed() const {
-	return this->downlinkAvgSpeed.mean();
+double HttpClient::downlinkSpeed() const {
+	return this->throughputTracker_.downlinkSpeed();
 }
 
-float HttpClient::peakUplinkSpeed() const {
-	return this->uplinkAvgSpeed.max();
+double HttpClient::peakUplinkSpeed() const {
+	return this->throughputTracker_.peakUplinkSpeed();
 }
 
-float HttpClient::peakDownlinkSpeed() const {
-	return this->downlinkAvgSpeed.max();
+double HttpClient::peakDownlinkSpeed() const {
+	return this->throughputTracker_.peakDownlinkSpeed();
 }
 
 HttpResponse HttpClient::request(const HttpRequest& request, const RequestPolicy& policy) {
@@ -391,6 +414,7 @@ HttpResponse HttpClient::request(const HttpRequest& request, const RequestPolicy
 
 std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(const HttpRequest& request, const RequestPolicy& policy) {
 	TransferTask task(std::move(request), std::move(policy), this);
+	task.transfer.throughputTracker_ = &this->throughputTracker_;
 	std::shared_ptr<TransferState> state = task.state;
 
 	this->sema_.acquire();
@@ -413,6 +437,7 @@ HttpResponse HttpClient::request(const HttpRequest& request, const RequestPolicy
 
 std::shared_ptr<HttpClient::TransferState> HttpClient::send_request(const HttpRequest& request, const RequestPolicy& policy, const RetryPolicy& retryPolicy) {
 	TransferTask task(std::move(request), std::move(policy), std::move(retryPolicy), this);
+	task.transfer.throughputTracker_ = &this->throughputTracker_;
 	std::shared_ptr<TransferState> state = task.state;
 
 	this->sema_.acquire();
@@ -451,14 +476,6 @@ void HttpClient::worker_loop() {
 					CURLcode curlCode = msg->data.result;
 
 					it->transfer.finalize_transfer();
-
-					// Record uplink and downlink speed
-					curl_off_t upSpeed;
-					curl_off_t dlSpeed;
-					curl_easy_getinfo(easy, CURLINFO_SPEED_UPLOAD_T, &upSpeed);
-					curl_easy_getinfo(easy, CURLINFO_SPEED_DOWNLOAD_T, &dlSpeed);
-					this->downlinkAvgSpeed.push(dlSpeed);
-					this->uplinkAvgSpeed.push(upSpeed);
 
 					if (it->state->retry_) {
 						this->handle_retry_completion(it, curlCode);

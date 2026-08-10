@@ -348,8 +348,10 @@ int main() {
 
 		auto& client = http_client::HttpClient::getDefault();
 
-		std::cout << "\nAvarage download speed (bytes/s): " << std::to_string(client.downlinkSpeed());
-		std::cout << "\nAvarage upload speed (bytes/s): " << std::to_string(client.uplinkSpeed()) << std::endl;
+		std::cout << "\nAverage download speed over configured window (bytes/s): "
+		          << std::to_string(client.downlinkSpeed());
+		std::cout << "\nAverage upload speed over configured window (bytes/s): "
+		          << std::to_string(client.uplinkSpeed()) << std::endl;
 
 		return 0;
 	} catch (const std::exception& e) {

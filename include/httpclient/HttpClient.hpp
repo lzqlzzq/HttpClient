@@ -3,6 +3,7 @@
 #include "Models.hpp"
 #include "Utils.hpp"
 #include "RetryPolicy.hpp"
+#include "ThroughputTracker.hpp"
 
 #include <atomic>
 #include <future>
@@ -32,7 +33,8 @@ public:
 	// Connection pool settings
 	long maxConnections = 24L;
 	long pollTimeoutMs = 100;
-	size_t speedTrackWindow = 128;
+	// Rolling average/peak retention in seconds. Must be greater than zero.
+	uint32_t speedAverageWindowSeconds = 10;
 
 	// CURL multi settings
 	long maxHostConnections = 6L;
@@ -81,9 +83,14 @@ private:
 
 	const RequestPolicy policy;
 	const HttpClientSettings& settings_;
+	ThroughputTracker* throughputTracker_ = nullptr;
+	CumulativeCounter uploadedBytes_;
+	CumulativeCounter downloadedBytes_;
 
 	static size_t body_cb(void* ptr, size_t size, size_t nmemb, void* data);
 	static size_t header_cb(void* ptr, size_t size, size_t nmemb, void* data);
+	static int progress_cb(void* data, curl_off_t dltotal, curl_off_t dlnow,
+	                       curl_off_t ultotal, curl_off_t ulnow);
 };
 
 class HttpClient {
@@ -167,11 +174,13 @@ public:
 		return getDefault().send_request(std::move(request), std::move(policy), std::move(retryPolicy));
 	}
 
-	float uplinkSpeed() const;
-	float downlinkSpeed() const;
+	// Aggregate bytes/second across all transfers over the configured time window.
+	double uplinkSpeed() const;
+	double downlinkSpeed() const;
 
-	float peakUplinkSpeed() const;
-	float peakDownlinkSpeed() const;
+	// Largest completed one-second bucket still inside the configured time window.
+	double peakUplinkSpeed() const;
+	double peakDownlinkSpeed() const;
 
 	const HttpClientSettings& settings() const { return settings_; }
 
@@ -229,8 +238,7 @@ private:
 	std::mutex mutex_;
 	BoundedSemaphore sema_;
 
-	SlidingWindow<float> uplinkAvgSpeed;
-	SlidingWindow<float> downlinkAvgSpeed;
+	ThroughputTracker throughputTracker_;
 
 	friend class TransferState;
 };

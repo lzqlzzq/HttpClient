@@ -7,6 +7,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Options
 option(HTTPCLIENT_BUILD_EXAMPLES "Build HttpClient example programs" OFF)
+option(HTTPCLIENT_BUILD_TESTS "Build HttpClient tests" OFF)
 
 # Find libcurl
 find_package(CURL 8.10.0 QUIET)
@@ -65,4 +66,14 @@ target_link_libraries(HttpClient INTERFACE MyCurl::curl OpenSSL::Crypto)
 if(HTTPCLIENT_BUILD_EXAMPLES)
     add_executable(example examples/example.cpp)
     target_link_libraries(example PRIVATE HttpClient)
+endif()
+
+if(HTTPCLIENT_BUILD_TESTS)
+    enable_testing()
+    find_package(Threads REQUIRED)
+
+    add_executable(throughput_tracker_test tests/ThroughputTrackerTest.cpp)
+    target_include_directories(throughput_tracker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(throughput_tracker_test PRIVATE Threads::Threads)
+    add_test(NAME throughput_tracker_test COMMAND throughput_tracker_test)
 endif()
