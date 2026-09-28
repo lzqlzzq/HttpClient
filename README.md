@@ -65,6 +65,29 @@ target_link_libraries(your_target PRIVATE HttpClient)
 
 ## Usage
 
+### Request concurrency and connection caching
+
+`maxConcurrentRequests` limits admitted requests (default 12), independently of
+`maxConnections`, the libcurl connection cache size (default 24).
+Paused transfers and requests waiting for retry release their request slots.
+`maxHostConnections` and `maxTotalConnections` limit active connections, not
+requests; zero means unlimited for these two libcurl settings.
+Both client constructors use the same defaults. Settings must outlive the client.
+
+```cpp
+http_client::HttpClientSettings settings;
+settings.maxConcurrentRequests = 6;
+settings.maxConnections = 24;
+settings.maxHostConnections = 8;
+settings.maxTotalConnections = 24;
+http_client::HttpClient client(settings);
+```
+
+Migration: custom clients previously also used `maxConnections` as their request
+limit. Set `maxConcurrentRequests` explicitly to preserve that concurrency while
+sizing the connection cache separately. Rebuild dependents after updating the
+library because the settings layout changes.
+
 ### Blocking request (`HttpTransfer`)
 
 ```cpp

@@ -31,13 +31,17 @@ public:
 	 */
 	static const HttpClientSettings& getDefault();
 
-	// Connection pool settings
+	// Maximum cached connections (CURLOPT_MAXCONNECTS / CURLMOPT_MAXCONNECTS).
+	// Independent of request concurrency and active connection limits.
 	long maxConnections = 24L;
+	// Maximum admitted requests, including queued transfers. Must be > 0.
+	// Paused transfers and requests waiting for retry release their slots.
+	unsigned int maxConcurrentRequests = 12;
 	long pollTimeoutMs = 100;
 	// Rolling average/peak retention in seconds. Must be greater than zero.
 	uint32_t speedAverageWindowSeconds = 10;
 
-	// CURL multi settings
+	// Active connection limits; 0 means unlimited (libcurl semantics).
 	long maxHostConnections = 6L;
 	long maxTotalConnections = 12L;
 
@@ -96,7 +100,7 @@ private:
 
 class HTTPCLIENT_API HttpClient {
 public:
-	class TransferState {
+	class HTTPCLIENT_API TransferState {
 	public:
 		enum State { Pending, Ongoing, Completed, Pause, Paused, Resume, Failed, Cancel };
 		std::shared_future<HttpResponse> future;
