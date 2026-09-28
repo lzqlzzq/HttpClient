@@ -11,6 +11,7 @@ extern "C" {
 #include <optional>
 #include <regex>
 #include <thread>
+#include <stdexcept>
 #include <utility>
 
 namespace http_client {
@@ -369,16 +370,14 @@ void HttpClient::init() {
 }
 
 HttpClient::HttpClient()
-	: settings_(HttpClientSettings::getDefault()),
-	  sema_(settings_.maxTotalConnections, settings_.maxTotalConnections),
-	  throughputTracker_(settings_.speedAverageWindowSeconds) {
-	init();
-}
+	: HttpClient(HttpClientSettings::getDefault()) {}
 
 HttpClient::HttpClient(const HttpClientSettings& settings)
 	: settings_(settings),
-	  sema_(settings_.maxConnections, settings_.maxConnections),
+	  sema_(settings_.maxConcurrentRequests, settings_.maxConcurrentRequests),
 	  throughputTracker_(settings_.speedAverageWindowSeconds) {
+	if (settings_.maxConcurrentRequests == 0)
+		throw std::invalid_argument("maxConcurrentRequests must be greater than zero");
 	init();
 }
 
